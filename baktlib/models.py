@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from logging import getLogger
 
-from constants import *
+from baktlib.constants import *
 
 logger = getLogger(__name__)
 
@@ -113,7 +113,9 @@ class Position(object):
         self.closed_at = exec_date
         self.open_amount = round(float(open_amount - Decimal(exec_size)), 8)
 
+        logger.debug(f"Position was closed({'partial' if self.open_amount else 'full'}). [{self}]")
+
     def __str__(self):
         return f"Position[id={self.id}, side={self.side}, amount={self.amount}, open_amount={self.open_amount}, " \
-            f"opened_at={self.opened_at}, open_price={self.open_price}, open_fee={self.open_fee}" \
+            f"opened_at={self.opened_at}, open_price={self.open_price}, open_fee={self.open_fee}, " \
             f"closed_at={self.closed_at}, close_price={self.close_price}, close_fee={self.close_fee}]"

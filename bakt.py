@@ -1,9 +1,8 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 # coding: utf-8
 
 import logging.config
 import os.path
-import random
 from argparse import ArgumentParser
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -11,9 +10,13 @@ from logging import getLogger
 from typing import List
 
 import pandas as pd
+import time
 
-from constants import *
-from models import Order, Position
+from baktlib import bktrepo
+from baktlib.constants import *
+from baktlib.models import Order, Position
+
+from baktlib.helpers import bitflyer
 
 logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
 logger = getLogger(__name__)
@@ -30,9 +33,79 @@ timeframe_sec = 1  # type: int
 
 orders = []  # type: List[Order]
 trades = []  # type: List[dict]
-positions = []
+positions = []  # type: List[Position]
 position_id = 0  # type: int
-ZERO = Decimal(0)  # type: Decimal
+ZERO = Decimal('0')  # type: Decimal
+order_id = 0  # type: int
+
+# history
+buy_pos_size = []
+sell_pos_size = []
+realized_pnl = []  # type: List[float]
+unrealized_pnl = []  # type: List[float]
+ltp_hst = []
+buy_volume = []
+sell_volume = []
+
+# measurement
+time_sum_unrealized_pnl = []
+time_sum_current_pos_size = []
+
+
+def d(f: float) -> Decimal:
+    """数値をDecimal型に変換して返します。
+    :param f: 数値
+    :return: Decimal(str(f))
+    """
+    return Decimal(str(f))
+
+
+def sum_current_pos_size() -> float:
+    """保有中のポジションの量を返します。
+    :return: 保有中のポジションの量
+    """
+    s = time.time()
+    val = round(float(sum([d(p.open_amount) for p in positions])), 8) if positions else 0.0
+    time_sum_current_pos_size.append(float(d(time.time()) - d(s)))
+    return val
+
+
+def sum_current_buy_pos_size() -> float:
+    s = time.time()
+    val = round(float(sum([d(p.open_amount) for p in positions if p.side == SIDE_BUY])), 8) if positions else 0.0
+    time_sum_current_pos_size.append(float(d(time.time()) - d(s)))
+    return val
+
+
+def sum_current_sell_pos_size() -> float:
+    s = time.time()
+    val = round(float(sum([d(p.open_amount) for p in positions if p.side == SIDE_SELL])), 8) if positions else 0.0
+    time_sum_current_pos_size.append(float(d(time.time()) - d(s)))
+    return val
+
+
+def sum_unrealized_pnl(ltp: float) -> float:
+    """未実現損益をの金額を返します。
+    最終取引価格（ltp）に基づいて、保有中のポジションの未実現損益（含み損益）を計算して返します。
+    :param ltp: 最終取引価格
+    :return: 未実現損益
+    """
+    s = time.time()
+    if not positions:
+        return 0
+    if positions[0].side == SIDE_BUY:
+        pnl = [(d(ltp) - d(p.open_price)) * d(p.open_amount) for p in positions]
+    elif positions[0].side == SIDE_SELL:
+        pnl = [(d(p.open_price) - d(ltp)) * d(p.open_amount) for p in positions]
+    val = round(float(sum(pnl)), 8)
+    time_sum_unrealized_pnl.append(float(d(time.time()) - d(s)))
+    return val
+
+
+def get_order_id():
+    global order_id
+    order_id += 1
+    return order_id
 
 
 def get_active_orders(dt: datetime) -> List[Order]:
@@ -43,24 +116,6 @@ def cancel_expired_orders(dt: datetime) -> None:
     for o in get_active_orders(dt):
         if (dt - o.created_at).seconds > order_expire_sec:
             o.cancel()
-
-
-# def create_position(index: int, opened_at: datetime, side: str, price: float, amount: float, fee_rate: float) -> dict:
-#     global position_id
-#     position_id += 1
-#     return {'id': position_id,
-#             'open_index': index,
-#             'side': side,
-#             'amount': amount,
-#             'opened_at': opened_at,
-#             'open_price': price,
-#             'open_fee': 0,
-#             'open_amount': amount,
-#             'close_index': None,
-#             'closed_at': None,
-#             'close_price': None,
-#             'close_fee': 0,
-#             'pnl': 0}
 
 
 # def close_position(idx, p: dict, exec_date, exec_price, exec_size):
@@ -92,7 +147,6 @@ def cancel_expired_orders(dt: datetime) -> None:
 #     else:
 #         raise SystemError(f"Illegal value [side='{p['side']}'")
 #
-#     # TODO bitFlyerの損益計算に合わせる
 #     pnl = float(Decimal(p['pnl']) + current_pnl)
 #
 #     # 残りのオープンポジション量
@@ -108,13 +162,13 @@ def cancel_expired_orders(dt: datetime) -> None:
 #               'close_fee': 0,
 #               'pnl': pnl})
 
-
 def contract(execution, active_orders: List[Order]):
     global position_id
     exec_date = execution['exec_date']
     exec_price = float(execution['price'])
     exec_size = float(execution['size'])
     exec_side = execution['side']
+    logger.debug(f"Execution: date={exec_date}, side={exec_side}, size={exec_size}, price={exec_price}")
 
     for o in active_orders:
 
@@ -149,15 +203,15 @@ def contract(execution, active_orders: List[Order]):
                         # TODO 約定量が多い場合、残った約定量を次の注文に適用する
                         # 約定量が注文量より多いのでこの注文は全て約定する
                         o.contract(o.open_size)
+                        logger.debug(f"Full contract.")
 
                     # 注文量の一部が約定する場合
                     else:
-                        # p = create_position(idx, exec_date, o.side, o.price, exec_size, 0.0)
                         position_id += 1
-                        p = Position(position_id, exec_date, o.side, o.price, o.open_size, 0.0)
+                        p = Position(position_id, exec_date, o.side, o.price, exec_size, 0.0)
                         positions.append(p)
                         o.contract(exec_size)
-                        # logger.debug(f"Partial contract, Created position [{p}]")
+                        logger.debug(f"Partial contract.")
 
                 # 決済対象のポジションが存在する場合
                 else:
@@ -184,10 +238,10 @@ def contract(execution, active_orders: List[Order]):
                         else:
 
                             # 約定した量
-                            open_amount = Decimal(p.open_amount)
+                            open_amount = d(p.open_amount)
 
                             # 注文の残量を更新
-                            order_size = round(float(Decimal(order_size) - open_amount), 8)  # type: float
+                            order_size = round(float(d(order_size) - open_amount), 8)  # type: float
 
                             # 残りのポジションを全てクローズ
                             p.close(exec_date, exec_price, p.open_amount)
@@ -216,24 +270,17 @@ def run(executions: pd.DataFrame):
     logger.info(f"  since: {executions.head(1).iat[0, 0]}")
     logger.info(f"  until: {executions.tail(1).iat[0, 0]}")
 
-    order_id = 0  # type: int
-    ltp = 0  # type: float
-
     if executions.empty:
         raise ValueError()
 
     executions['exec_date'] = pd.to_datetime(executions['exec_date'])
-
     start_time = executions.at[0, 'exec_date']
     logger.info(f"Start to trading. time: {start_time}")
-
     count = 0
-
     since = start_time
     until = since + timedelta(seconds=timeframe_sec)
 
     while True:
-
         logger.info(f"Start to trading. since {since} until {until}")
 
         # 現在時刻までの約定履歴を取得する
@@ -246,48 +293,79 @@ def run(executions: pd.DataFrame):
         else:
             for idx, e in new_executions.iterrows():
                 contract(e, get_active_orders(until))
-            ltp = float(new_executions.tail(1).iat[0, 3])
+
+            ltp = new_executions.tail(1)['price'].values[0]
 
         # 注文キャンセル処理
         cancel_expired_orders(until)
 
         # シグナル探索&発注
-        r = random.randint(0, 4)
-        if r in [0]:
-            # TODO 注文時の価格、量を取引戦略に基づいて決定するように変更する
+        think(until, executions[executions['exec_date'] < until])
 
-            # 買い注文発行
-            order_id += 1
-            buy_order = Order(id=order_id, created_at=until, side=SIDE_BUY, _type=ORDER_TYPE_LIMIT, size=0.1,
-                              price=ltp - 2)
-            orders.append(buy_order)
-
-            # 売り注文発行
-            order_id += 1
-            sell_order = Order(id=order_id, created_at=until, side=SIDE_SELL, _type=ORDER_TYPE_LIMIT, size=0.1,
-                               price=ltp + 2)
-            orders.append(sell_order)
+        # 時間枠ごとに状況を記録する
+        buy_pos_size.append(sum_current_buy_pos_size())
+        sell_pos_size.append(sum_current_sell_pos_size())
+        realized_pnl.append(sum([t.pnl for t in trades]))
+        unrealized_pnl.append(sum_unrealized_pnl(ltp))
+        ltp_hst.append(ltp)
+        buy_volume.append(round(float(new_executions[new_executions['side'] == 'BUY']['size'].sum()), 8))
+        sell_volume.append(round(float(new_executions[new_executions['side'] == 'SELL']['size'].sum()) * -1, 8))
 
         # 時間を進める
         since = until
         until = since + timedelta(seconds=timeframe_sec)
 
+        # FIXME
         count += 1
-        if count > 1000:
+        if count > 180:
             break
 
         logger.info(f"End trading.\n")
 
 
+def think(dt: datetime, executions: pd.DataFrame) -> None:
+    ltp = float(executions.tail(1).iat[0, 3])  # type: float
+
+    t = bitflyer.conv_exec_to_ohlc(executions.tail(1), str(timeframe_sec) + 's')
+    t['ls_sub'] = t['buy_size']['buy_size'] - t['sell_size']['sell_size']
+    # print(t)
+    val = t['ls_sub'].values[0]
+
+    psize = sum_current_pos_size()
+    has_buy = positions and positions[0].side == 'BUY'
+    has_sell = positions and positions[0].side == 'SELL'
+
+    th = 0.6
+    if val >= th:
+        buy_order = Order(id=get_order_id(),
+                          created_at=dt,
+                          side=SIDE_BUY,
+                          _type=ORDER_TYPE_LIMIT,
+                          size=0.1 + (psize if has_sell else 0),
+                          price=ltp)
+        orders.append(buy_order)
+    elif val <= -th:
+        sell_order = Order(id=get_order_id(),
+                           created_at=dt,
+                           side=SIDE_SELL,
+                           _type=ORDER_TYPE_LIMIT,
+                           size=0.1 + (psize if has_buy else 0),
+                           price=ltp)
+        orders.append(sell_order)
+
+
 if __name__ == '__main__':
 
+    # Parse arguments
     parser = ArgumentParser()
     parser.add_argument('-f', '--file', required=False, action='store', dest='file', help='')
     args = parser.parse_args()
 
+    # 引数で指定されたデータファイルが存在しない場合はエラーで終了させる
     if not os.path.exists(args.file):
         raise FileNotFoundError(f"File not found. [{args.file}]")
 
+    # 約定履歴ファイルを読み込む
     data = pd.read_csv(args.file, dtype={'exec_date': 'str',
                                          'id': 'int',
                                          'side': 'str',
@@ -295,24 +373,28 @@ if __name__ == '__main__':
                                          'size': 'float',
                                          'buy_child_order_acceptance_id': 'str',
                                          'sell_child_order_acceptance_id': 'str'})  # type: pd.DataFrame
+
+    # バックテスト実行
     run(data)
 
-    logger.debug('[Trades]')
-    for t in trades:
-        logger.debug(f"Trade -> {t}")
+    bktrepo.print_orders(orders)
+    bktrepo.print_trades(trades)
+    bktrepo.print_graph(data, trades, buy_pos_size, sell_pos_size, realized_pnl, unrealized_pnl, ltp_hst, buy_volume,
+                        sell_volume)
 
-    print(f"Number of order: {len([o for o in orders if o.is_active()])}")
-    print(f"Total order size: {round(float(sum([Decimal(o.size) for o in orders])), 8) if orders else 0}")
+    # order
+    print(f"Number of order: {len(orders)}")
+    print(f"Number of buy order: {len([o for o in orders if o.side == SIDE_BUY])}")
+    print(f"Number of sell order: {len([o for o in orders if o.side == SIDE_SELL])}")
+    print(f"Number of canceled order: {len([o for o in orders if o.status == ORDER_STATUS_CANCELED])}")
+    print(f"Number of limit order: {len([o for o in orders if o.type == ORDER_TYPE_LIMIT])}")
+    print(f"Number of market order: {len([o for o in orders if o.type == ORDER_TYPE_MARKET])}")
+
+    print(f"Number of trades: {len(trades) * 2}")
+
+    print(f"Total order size: {round(float(sum([d(o.size) for o in orders])), 8) if orders else 0}")
     print(f"Total pnl: {sum([t.pnl for t in trades])}")
 
-    t_orders = pd.DataFrame(data={'id': [o.id for o in orders],
-                                  'created_at': [o.created_at for o in orders],
-                                  'side': [o.side for o in orders],
-                                  'type': [o.type for o in orders],
-                                  'price': [o.price for o in orders],
-                                  'size': [o.size for o in orders],
-                                  'status': [o.status for o in orders],
-                                  'open_size': [o.open_size for o in orders]})
-    # print(t_orders)
-    # for t in trades:
-    #     print("trade-> ", t)
+    # time
+    print(f"time_sum_current_pos_size: {sum(time_sum_current_pos_size)}")
+    print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")

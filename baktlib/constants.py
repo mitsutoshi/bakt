@@ -6,6 +6,9 @@ ORDER_STATUS_ACTIVE = 'ACTIVE'  # type: str
 ORDER_STATUS_CANCELED = 'CANCELED'  # type: str
 """注文ステータス：キャンセル済み"""
 
+ORDER_STATUS_PARTIAL = 'PARTIAL'  # type: str
+"""注文ステータス：一部約定済み"""
+
 ORDER_STATUS_COMPLETED = 'COMPLETED'  # type: str
 """注文ステータス：約定済み"""
 
