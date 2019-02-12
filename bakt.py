@@ -32,7 +32,7 @@ timeframe_sec = 1  # type: int
 """取引の時間間隔（秒）"""
 
 orders = []  # type: List[Order]
-trades = []  # type: List[dict]
+trades = []  # type: List[Position]
 positions = []  # type: List[Position]
 position_id = 0  # type: int
 ZERO = Decimal('0')  # type: Decimal
@@ -202,7 +202,7 @@ def contract(execution, active_orders: List[Order]):
 
                         # TODO 約定量が多い場合、残った約定量を次の注文に適用する
                         # 約定量が注文量より多いのでこの注文は全て約定する
-                        o.contract(o.open_size)
+                        o.contract(exec_date, exec_price, o.open_size)
                         logger.debug(f"Full contract.")
 
                     # 注文量の一部が約定する場合
@@ -210,7 +210,7 @@ def contract(execution, active_orders: List[Order]):
                         position_id += 1
                         p = Position(position_id, exec_date, o.side, o.price, exec_size, 0.0)
                         positions.append(p)
-                        o.contract(exec_size)
+                        o.contract(exec_date, exec_price, exec_size)
                         logger.debug(f"Partial contract.")
 
                 # 決済対象のポジションが存在する場合
@@ -230,7 +230,7 @@ def contract(execution, active_orders: List[Order]):
 
                             p.close(exec_date, exec_price, order_size)
                             logger.debug(f"Close position [{p}, {o}]")
-                            o.contract(order_size)
+                            o.contract(exec_date, exec_price, order_size)
                             order_size = 0
                             # logger.debug(f"Partial contract, settlement position  [{p}]")
 
@@ -247,9 +247,7 @@ def contract(execution, active_orders: List[Order]):
                             p.close(exec_date, exec_price, p.open_amount)
 
                             # 約定した量の分を注文に反映
-                            o.contract(round(float(open_amount), 8))
-
-                            # logger.debug(f"Full contract, settlement position [{p}]")
+                            o.contract(exec_date, exec_price, round(float(open_amount), 8))
 
                             trades.append(p)
 
@@ -279,9 +277,19 @@ def run(executions: pd.DataFrame):
     count = 0
     since = start_time
     until = since + timedelta(seconds=timeframe_sec)
+    trade_num = 1  # type: int
 
     while True:
-        logger.info(f"Start to trading. since {since} until {until}")
+        logger.info(f"Start to trading. [No: {trade_num}, time: '{since}' <= time < '{until}']")
+        logger.debug("Orders:")
+        logger.debug(f"  ACTIVE        : {len([o for o in orders if o.status == ORDER_STATUS_ACTIVE])}")
+        logger.debug(f"  CANCELED      : {len([o for o in orders if o.status == ORDER_STATUS_CANCELED])}")
+        logger.debug(f"  PARTIAL       : {len([o for o in orders if o.status == ORDER_STATUS_PARTIAL])}")
+        logger.debug(f"  COMPLETED     : {len([o for o in orders if o.status == ORDER_STATUS_COMPLETED])}")
+        logger.debug("Positions:")
+        logger.debug(f"  length        : {len(positions)}")
+        logger.debug(f"  size of buy   : {sum_current_buy_pos_size()}")
+        logger.debug(f"  size of sell  : {sum_current_sell_pos_size()}")
 
         # 現在時刻までの約定履歴を取得する
         new_executions = executions[
@@ -316,8 +324,8 @@ def run(executions: pd.DataFrame):
         until = since + timedelta(seconds=timeframe_sec)
 
         # FIXME
-        count += 1
-        if count > 180:
+        trade_num += 1
+        if trade_num > 180:
             break
 
         logger.info(f"End trading.\n")
@@ -378,6 +386,7 @@ if __name__ == '__main__':
     run(data)
 
     bktrepo.print_orders(orders)
+    bktrepo.print_executions(orders)
     bktrepo.print_trades(trades)
     bktrepo.print_graph(data, trades, buy_pos_size, sell_pos_size, realized_pnl, unrealized_pnl, ltp_hst, buy_volume,
                         sell_volume)

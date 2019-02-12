@@ -33,6 +33,7 @@ class Order(object):
         self.size = size
         self.open_size = size
         self.status = ORDER_STATUS_ACTIVE
+        self.executions = []  # type: List
         logger.debug(f"Order was created. {self}")
 
     def cancel(self) -> None:
@@ -40,15 +41,34 @@ class Order(object):
         self.status = ORDER_STATUS_CANCELED
         logger.debug(f"Order was canceled. [{self}]")
 
-    def contract(self, exec_size) -> None:
+    def contract(self, exec_date: datetime, exec_price: float, exec_size: float) -> None:
         """指定したサイズで注文を約定します。
+        :param exec_date: 約定日時
+        :param exec_price: 約定価格
         :param exec_size: 約定サイズ
         """
-        if exec_size > self.open_size:
-            raise ValueError(f"Size is too large. [exec_size={exec_size}, open_size={self.open_size}]")
+
+        # 約定価格と注文価格に不整合が発生していないかチェック
+        if self.type == ORDER_TYPE_LIMIT:
+            m = f"Contract price is inappropriate. [side={self.side}, order_price={self.price}, exec_price={exec_price}]"
+            if self.side == SIDE_BUY:
+                assert exec_price <= self.price, m
+            elif self.side == SIDE_SELL:
+                assert exec_price >= self.price, m
+
+        # 約定サイズが注文サイズを超えていないかチェック
+        assert exec_size <= self.open_size, f"Size is too large. [exec_size={exec_size}, open_size={self.open_size}]"
+
         self.open_size = round(float(Decimal(self.open_size) - Decimal(exec_size)), 8)
         if self.open_size == 0:
             self.status = ORDER_STATUS_COMPLETED
+
+        # 約定履歴を作成
+        self.executions.append(Execution(order_id=self.id,
+                                         created_at=exec_date,
+                                         side=self.side,
+                                         price=exec_price,
+                                         size=exec_size))
         logger.debug(f"Order was contracted. [{self}]")
 
     def is_active(self) -> bool:
@@ -61,6 +81,19 @@ class Order(object):
     def __str__(self):
         return f"Order[id={self.id}, {self.created_at}, side={self.side}, type={self.type}," \
             f" size={self.size}, open_size={self.open_size}, price={self.price}, status={self.status}]"
+
+
+class Execution(object):
+
+    def __init__(self, order_id, created_at: datetime, side: str, size: float, price: float):
+        self.order_id = order_id
+        self.created_at = created_at
+        self.side = side
+        self.size = size
+        self.price = price
+
+    def __str__(self):
+        return f"Execution[created_at{self.created_at}, side={self.side}, size={self.size}, price={self.price}]"
 
 
 class Position(object):

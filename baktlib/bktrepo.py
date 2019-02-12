@@ -5,7 +5,7 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from baktlib.models import Order, Position
+from baktlib.models import Order, Execution, Position
 
 
 def print_orders(orders: List[Order]):
@@ -19,6 +19,20 @@ def print_orders(orders: List[Order]):
                            'open_size': [o.open_size for o in orders]})
     print('\n[Orders]\n')
     print(t.loc[:, ['id', 'created_at', 'side', 'type', 'size', 'price', 'status', 'open_size']])
+
+
+def print_executions(orders: List[Order]):
+    executions = []  # type: List[Execution]
+    for o in orders:
+        executions.extend(o.executions)
+    # executions.sort(key=lambda e: e.created_at)
+    t = pd.DataFrame(data={'created_at': [o.created_at for o in executions],
+                           'side': [o.side for o in executions],
+                           'price': [o.price for o in executions],
+                           'size': [o.size for o in executions],
+                           'order_id': [o.order_id for o in executions]})
+    print('\n[Executions]\n')
+    print(t.loc[:, ['created_at', 'side', 'size', 'price', 'order_id']])
 
 
 def print_trades(trades: List[Position]):
@@ -47,7 +61,6 @@ def print_graph(executions: pd.DataFrame,
                 ltp_hst,
                 buy_volume,
                 sell_volume):
-
     title_fsize = 22
     label_fsize = 16
     figsize = (16, 24)
