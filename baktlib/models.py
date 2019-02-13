@@ -5,7 +5,7 @@ from decimal import Decimal
 from logging import getLogger
 
 from baktlib.constants import *
-from baktlib.helpers.calc import d, sub
+from baktlib.helpers.calc import d, add, sub
 
 logger = getLogger(__name__)
 
@@ -123,28 +123,31 @@ class Position(object):
         # ポジションの現在のオープン量
         open_amount = d(self.open_amount)  # type: Decimal
 
-        # 過去の約定済み金額 = 約定価格 * 約定済みサイズ（amount - open_amount）
-        past = d(self.close_price) * (amount - open_amount) if self.close_price else d(0)  # type: Decimal
-
         # クローズ価格
         close_price = d(exec_price)  # type: Decimal
 
-        # TODO bitFlyerの損益計算に合わせる
+        # クローズが既に発生している場合は、過去の約定済み金額を算出
+        if self.close_price:
+            closed_amount = amount - open_amount
+            past = d(self.close_price) * closed_amount  # type: Decimal
+        else:
+            past = d(0)
+
+        # TODO bitFlyer
         # 損益計算
         if self.side == SIDE_BUY:
-            current_pnl = (close_price - d(self.open_price)) * open_amount
+            current_pnl = round((close_price - d(self.open_price)) * d(exec_size))
         elif self.side == SIDE_SELL:
-            current_pnl = (d(self.open_price) - close_price) * open_amount
+            current_pnl = round((d(self.open_price) - close_price) * d(exec_size))
         else:
             raise SystemError(f"Illegal value [side='{self.side}'")
-        self.pnl = float(d(self.pnl) + current_pnl)
+
+        # 過去の損益と今回クローズした分の損益の合計を計算
+        self.pnl = round(float(d(self.pnl) + current_pnl))
 
         # 約定総額 = 今回約定金額＋約定済み金額
-        current = close_price * open_amount
-        self.close_price = float((past + current) / amount)
-
-        # TODO feeに対応させる
-        self.close_fee = 0
+        self.close_price = (past + close_price * open_amount) / amount
+        self.close_fee = 0  # TODO feeに対応させる
         self.closed_at = exec_date
         self.open_amount = round(float(open_amount - d(exec_size)), 8)
 
