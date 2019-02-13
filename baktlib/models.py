@@ -5,6 +5,7 @@ from decimal import Decimal
 from logging import getLogger
 
 from baktlib.constants import *
+from baktlib.helpers.calc import d, sub
 
 logger = getLogger(__name__)
 
@@ -57,7 +58,8 @@ class Order(object):
                 assert exec_price >= self.price, m
 
         # 約定サイズが注文サイズを超えていないかチェック
-        assert exec_size <= self.open_size, f"Size is too large. [exec_size={exec_size}, open_size={self.open_size}]"
+        assert exec_size <= self.open_size,\
+            f"Size is too large. [{self.id}, exec_size={exec_size}, open_size={self.open_size}]"
 
         self.open_size = round(float(Decimal(self.open_size) - Decimal(exec_size)), 8)
         if self.open_size == 0:
@@ -69,7 +71,7 @@ class Order(object):
                                          side=self.side,
                                          price=exec_price,
                                          size=exec_size))
-        logger.debug(f"Order was contracted. [{self}]")
+        logger.debug(f"Order was {'full' if self.open_size == 0 else 'partial'} contracted. [{self}]")
 
     def is_active(self) -> bool:
         """この注文が有効であるかどうかを返します。
@@ -98,8 +100,9 @@ class Execution(object):
 
 class Position(object):
 
-    def __init__(self, id: int, opened_at: datetime, side: str, open_price: float, amount: float, fee_rate: float):
+    def __init__(self, id: int, opened_at: datetime, side: str, open_price: float, amount: float, fee_rate: float, open_order_id: int):
         self.id = id
+        self.open_order_id = open_order_id
         self.opened_at = opened_at
         self.side = side
         self.amount = amount
@@ -115,40 +118,39 @@ class Position(object):
     def close(self, exec_date: datetime, exec_price: float, exec_size: float) -> float:
 
         # クローズ済みの分を含むポジションの全体量
-        amount = Decimal(self.amount)  # type: Decimal
+        amount = d(self.amount)  # type: Decimal
 
         # ポジションの現在のオープン量
-        open_amount = Decimal(self.open_amount)  # type: Decimal
+        open_amount = d(self.open_amount)  # type: Decimal
 
         # 過去の約定済み金額 = 約定価格 * 約定済みサイズ（amount - open_amount）
-        past = Decimal(self.close_price) * (amount - open_amount) if self.close_price else Decimal(0)  # type: Decimal
+        past = d(self.close_price) * (amount - open_amount) if self.close_price else d(0)  # type: Decimal
 
         # クローズ価格
-        close_price = Decimal(exec_price)  # type: Decimal
+        close_price = d(exec_price)  # type: Decimal
+
+        # TODO bitFlyerの損益計算に合わせる
+        # 損益計算
+        if self.side == SIDE_BUY:
+            current_pnl = (close_price - d(self.open_price)) * open_amount
+        elif self.side == SIDE_SELL:
+            current_pnl = (d(self.open_price) - close_price) * open_amount
+        else:
+            raise SystemError(f"Illegal value [side='{self.side}'")
+        self.pnl = float(d(self.pnl) + current_pnl)
 
         # 約定総額 = 今回約定金額＋約定済み金額
         current = close_price * open_amount
-
-        # 損益計算
-        if self.side == SIDE_BUY:
-            current_pnl = (close_price - Decimal(self.open_price)) * open_amount
-        elif self.side == SIDE_SELL:
-            current_pnl = (Decimal(self.open_price) - close_price) * open_amount
-        else:
-            raise SystemError(f"Illegal value [side='{self.side}'")
-
-        # TODO bitFlyerの損益計算に合わせる
-        self.pnl = float(Decimal(self.pnl) + current_pnl)
         self.close_price = float((past + current) / amount)
 
         # TODO feeに対応させる
         self.close_fee = 0
         self.closed_at = exec_date
-        self.open_amount = round(float(open_amount - Decimal(exec_size)), 8)
+        self.open_amount = round(float(open_amount - d(exec_size)), 8)
 
         logger.debug(f"Position was closed({'partial' if self.open_amount else 'full'}). [{self}]")
 
     def __str__(self):
-        return f"Position[id={self.id}, side={self.side}, amount={self.amount}, open_amount={self.open_amount}, " \
-            f"opened_at={self.opened_at}, open_price={self.open_price}, open_fee={self.open_fee}, " \
-            f"closed_at={self.closed_at}, close_price={self.close_price}, close_fee={self.close_fee}]"
+        return f"Position[id={self.id}, side={self.side}, amount={self.amount}, open_order_id={self.open_order_id}, " \
+            f"opened_at={self.opened_at}, open_amount={self.open_amount}, open_price={self.open_price}, " \
+            f"open_fee={self.open_fee}, closed_at={self.closed_at}, close_price={self.close_price}, close_fee={self.close_fee}]"

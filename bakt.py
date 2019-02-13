@@ -15,6 +15,7 @@ import time
 from baktlib import bktrepo
 from baktlib.constants import *
 from baktlib.helpers import bitflyer
+from baktlib.helpers.calc import d, sub
 from baktlib.models import Order, Position
 
 logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
@@ -24,7 +25,7 @@ pd.set_option('display.width', 300)
 order_expire_sec = 2  # type: int
 """注文の有効時間（秒）"""
 
-delay_order_creation_sec = 0.5  # type: float
+delay_order_creation_sec = 1  # type: float
 """注文が板乗りするまでの時間（秒）"""
 
 timeframe_sec = 2  # type: int
@@ -49,14 +50,8 @@ sell_volume = []
 # measurement
 time_sum_unrealized_pnl = []
 time_sum_current_pos_size = []
-
-
-def d(f: float) -> Decimal:
-    """数値をDecimal型に変換して返します。
-    :param f: 数値
-    :return: Decimal(str(f))
-    """
-    return Decimal(str(f))
+time_think = []
+time_cancel = []
 
 
 def sum_current_pos_size() -> float:
@@ -135,85 +130,71 @@ def contract(execution, active_orders: List[Order]):
             # 売り注文、買いテイク、約定価格が売り注文の指値以上の場合
             sell_ok = o.side == SIDE_SELL and exec_side == SIDE_BUY and exec_price >= o.price  # type: bool
 
-            # アクティブな注文に対して約定が発生したか否か
-            if buy_ok or sell_ok:
+            # 約定していないならスキップして次の注文を処理する
+            if not buy_ok and not sell_ok:
+                continue
 
-                # 保有中のポジションから決済対象となるポジションを抽出
-                reverse_positions = [p for p in positions if (
-                    buy_ok and p.side == SIDE_SELL) or (sell_ok and p.side == SIDE_BUY)]
+            can_exec_size_by_order = min(o.open_size, exec_size)  # type: float
 
-                # 決済対象のポジションが存在しない場合
-                if not reverse_positions:
+            # 保有中のポジションから決済対象となるポジションを抽出
+            reverse_positions = [p for p in positions if (
+                buy_ok and p.side == SIDE_SELL) or (sell_ok and p.side == SIDE_BUY)]
 
-                    # 注文量の全てが約定する場合
-                    if exec_size >= o.open_size:
+            # 決済対象のポジションが存在しない場合
+            if not reverse_positions:
 
-                        # p = create_position(idx, exec_date, o.side, o.price, o.open_size, 0.0)
-                        position_id += 1
-                        p = Position(position_id, exec_date, o.side, o.price, o.open_size, 0.0)
+                position_id += 1
+                positions.append(Position(position_id, exec_date, o.side, o.price, can_exec_size_by_order, 0.0, o.id))
+                o.contract(exec_date, exec_price, can_exec_size_by_order)
+                exec_size = sub(exec_size, can_exec_size_by_order)
 
-                        positions.append(p)
-                        logger.debug(f"Created position [{p}, {o}]")
+            # 決済対象のポジションが存在する場合
+            else:
 
-                        # TODO 約定量が多い場合、残った約定量を次の注文に適用する
-                        # 約定量が注文量より多いのでこの注文は全て約定する
-                        o.contract(exec_date, exec_price, o.open_size)
-                        logger.debug(f"Full contract.")
+                # ポジション決済処理
+                for i, p in enumerate(positions):
 
-                    # 注文量の一部が約定する場合
+                    # 注文と同じsideのポジションはスキップ
+                    if (buy_ok and p.side == SIDE_BUY) or (sell_ok and p.side == SIDE_SELL):
+                        continue
+
+                    # ポジションの一部を決済
+                    if p.open_amount - can_exec_size_by_order > 0:
+                        p.close(exec_date, exec_price, can_exec_size_by_order)
+                        o.contract(exec_date, exec_price, can_exec_size_by_order)
+                        exec_size = sub(exec_size, can_exec_size_by_order)
+
+                        # この注文と約定履歴の約定可能量を消化しきっているため、ゼロで更新
+                        can_exec_size_by_order = 0
+
+                    # ポジションの全部を決済
                     else:
-                        position_id += 1
-                        p = Position(position_id, exec_date, o.side, o.price, exec_size, 0.0)
-                        positions.append(p)
-                        o.contract(exec_date, exec_price, exec_size)
-                        logger.debug(f"Partial contract.")
 
-                # 決済対象のポジションが存在する場合
-                else:
+                        # 約定履歴の持つ約定量からこのポジション決済によって、約定した分を減らす
+                        exec_size = sub(exec_size, p.open_amount)
 
-                    # この注文が現在処理中の約定に対して消化可能なサイズ
-                    order_size = min(o.open_size, exec_size)  # type: float
+                        # この注文と約定履歴の約定可能量を更新
+                        can_exec_size_by_order = sub(can_exec_size_by_order, p.open_amount)
 
-                    # ポジション決済処理
-                    for i, p in enumerate(positions):
+                        # 約定した量の分を注文に反映
+                        o.contract(exec_date, exec_price, p.open_amount)
 
-                        # 注文と同じsideのポジションはスキップ
-                        if (buy_ok and p.side == SIDE_BUY) or (sell_ok and p.side == SIDE_SELL):
-                            continue
+                        # 残りのポジションを全てクローズ
+                        p.close(exec_date, exec_price, p.open_amount)
+                        trades.append(p)
+                        del positions[i]
 
-                        if p.open_amount - order_size > 0:
-
-                            p.close(exec_date, exec_price, order_size)
-                            logger.debug(f"Close position [{p}, {o}]")
-                            o.contract(exec_date, exec_price, order_size)
-                            order_size = 0
-                            # logger.debug(f"Partial contract, settlement position  [{p}]")
-
-                        # 全て約定しきったためポジション解消する
-                        else:
-
-                            # 約定した量
-                            open_amount = d(p.open_amount)
-
-                            # 注文の残量を更新
-                            order_size = round(float(d(order_size) - open_amount), 8)  # type: float
-
-                            # 残りのポジションを全てクローズ
-                            p.close(exec_date, exec_price, p.open_amount)
-
-                            # 約定した量の分を注文に反映
-                            o.contract(exec_date, exec_price, round(float(open_amount), 8))
-
-                            trades.append(p)
-
-                            del positions[i]
-
-                        # 発注量を消化しきったらbreak
-                        if order_size == 0:
-                            break
-
+                    # 発注量を消化しきったらpositionsのループをbreakして次の注文の処理へ
+                    if can_exec_size_by_order == 0:
+                        break
         else:
+
+            # TODO market注文対応
             raise ValueError('Not support order type of market.')
+
+        # exec_sizeを消化しきっており、これ以上約定させられないため、処理を終了する
+        if exec_size == 0:
+            return
 
 
 def run(executions: pd.DataFrame):
@@ -227,13 +208,12 @@ def run(executions: pd.DataFrame):
         raise ValueError()
 
     executions['exec_date'] = pd.to_datetime(executions['exec_date'])
-    start_time = executions.at[0, 'exec_date']
-    logger.info(f"Start to trading. time: {start_time}")
-    since = start_time
+    since = executions.at[0, 'exec_date']
     until = since + timedelta(seconds=timeframe_sec)
     trade_num = 1  # type: int
+    logger.info(f"Start to trading. time: {since}")
 
-    while trade_num >= 1000:
+    while trade_num <= 1000:
 
         if trade_num % 100 == 0:
             logger.info(f"Start to trading. No: {trade_num}, Time: {until}")
@@ -262,10 +242,14 @@ def run(executions: pd.DataFrame):
             ltp = new_executions.tail(1)['price'].values[0]
 
         # 注文キャンセル処理
+        st_cancel = time.time()
         cancel_expired_orders(until)
+        time_cancel.append(time.time() - st_cancel)
 
         # シグナル探索&発注
+        st_think = time.time()
         think(until, executions[executions['exec_date'] < until])
+        time_think.append(time.time() - st_think)
 
         # 時間枠ごとに状況を記録する
         buy_pos_size.append(sum_current_buy_pos_size())
@@ -286,7 +270,7 @@ def run(executions: pd.DataFrame):
 def think(dt: datetime, executions: pd.DataFrame) -> None:
     ltp = float(executions.tail(1).iat[0, 3])  # type: float
     t = bitflyer.conv_exec_to_ohlc(executions, str(timeframe_sec) + 's').tail(2)
-    t['ls_diff'] = t['buy_size']['buy_size'] - t['sell_size']['sell_size']
+    # t['ls_diff'] = t['buy_size']['buy_size'] - t['sell_size']['sell_size']
     bs = t['buy_size'].values[0]
     ss = t['sell_size'].values[0]
     if bs > ss:
@@ -295,6 +279,7 @@ def think(dt: datetime, executions: pd.DataFrame) -> None:
         ls = ss / bs * (bs + ss) * -1 if bs else 0.5
     else:
         ls = 0
+    logger.debug(f"[think] {dt}, L/S Score: {ls}")
 
     psize = sum_current_pos_size()
     has_buy = positions and positions[0].side == 'BUY'
@@ -302,21 +287,19 @@ def think(dt: datetime, executions: pd.DataFrame) -> None:
 
     th = 100
     if ls >= th:
-        buy_order = Order(id=get_order_id(),
-                          created_at=dt,
-                          side=SIDE_BUY,
-                          _type=ORDER_TYPE_LIMIT,
-                          size=1 + (psize if has_sell else 0),
-                          price=ltp)
-        orders.append(buy_order)
+        orders.append(Order(id=get_order_id(),
+                            created_at=dt,
+                            side=SIDE_BUY,
+                            _type=ORDER_TYPE_LIMIT,
+                            size=1 + (psize if has_sell else 0),
+                            price=ltp))
     elif ls <= -th:
-        sell_order = Order(id=get_order_id(),
-                           created_at=dt,
-                           side=SIDE_SELL,
-                           _type=ORDER_TYPE_LIMIT,
-                           size=1 + (psize if has_buy else 0),
-                           price=ltp)
-        orders.append(sell_order)
+        orders.append(Order(id=get_order_id(),
+                            created_at=dt,
+                            side=SIDE_SELL,
+                            _type=ORDER_TYPE_LIMIT,
+                            size=1 + (psize if has_buy else 0),
+                            price=ltp))
 
 
 if __name__ == '__main__':
@@ -371,5 +354,7 @@ if __name__ == '__main__':
     # time
     print(f"time_sum_current_pos_size: {sum(time_sum_current_pos_size)}")
     print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")
+    print(f"time_think: {sum(time_think)}")
+    print(f"time_cancel: {sum(time_cancel)}")
 
     print(f"Time: {time.time() - st}")
