@@ -6,6 +6,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from baktlib.models import Order, Execution, Position
+from decimal import Decimal
 
 
 def print_orders(orders: List[Order]):
@@ -61,20 +62,23 @@ def print_graph(executions: pd.DataFrame,
                 buy_volume,
                 sell_volume,
                 times,
-                orders):
+                orders,
+                executions_me: List[Execution],
+                result):
     title_fsize = 22
     label_fsize = 16
     figsize = (36, 24)
     dpi = 96
 
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize, dpi=dpi)  # type: Figure, Tuple(Axes, Axes)
+    fig, axes = plt.subplots(nrows=3, ncols=2, figsize=figsize, dpi=dpi)  # type: Figure, Tuple(Axes, Axes)
+    plt.subplots_adjust(right=2)
 
     #
     # グラフ１：相場価格、出来高、注文価格
     #
 
     # 軸１、相場価格
-    ax_market = axes[0][0]  # type: Axes
+    ax_market = axes[1][0]  # type: Axes
     ax_market.set_title('Orders', fontsize=title_fsize)
     ax_market.set_xlabel('Time', fontsize=label_fsize)
     ax_market.set_ylabel('Price', fontsize=label_fsize)
@@ -106,7 +110,7 @@ def print_graph(executions: pd.DataFrame,
     #
 
     # 軸１、実現損益
-    ax_pnl = axes[0][1]  # type: Axes
+    ax_pnl = axes[1][1]  # type: Axes
     ax_pnl.set_title('Realized Profit and Loss', fontsize=title_fsize)
     ax_pnl.set_xlabel('Time', fontsize=label_fsize)
     ax_pnl.set_ylabel('Price', fontsize=label_fsize)
@@ -122,7 +126,7 @@ def print_graph(executions: pd.DataFrame,
     #
 
     # 軸１、保有ポジション量
-    ax_pos = axes[1][0]  # type: Axes
+    ax_pos = axes[2][0]  # type: Axes
     ax_pos.set_title('Position', fontsize=title_fsize)
     if buy_pos_size or sell_pos_size:
         ax_pos.set_ylabel('Size', fontsize=label_fsize)
@@ -149,7 +153,7 @@ def print_graph(executions: pd.DataFrame,
     for t in trades:
         total_pnl += t.pnl
         pnl.append(total_pnl)
-    ax_hist = axes[1][1]  # type: Axes
+    ax_hist = axes[2][1]  # type: Axes
     ax_hist.set_title('Realized Profit and Loss Histgram', fontsize=title_fsize)
     ax_hist.set_xlabel('Price', fontsize=label_fsize)
     ax_hist.set_ylabel('Count', fontsize=label_fsize)
@@ -157,7 +161,51 @@ def print_graph(executions: pd.DataFrame,
         ax_hist.hist(pnl, bins=20, color='orange', alpha=0.5, label='Realized Profit and Loss')
         ax_hist.vlines(x=0, ymin=0, ymax=1, colors='r', linestyles='solid')
 
+    # plt.xticks(color=None)
+    ax_text = axes[0][0]  # type: Axes
+    ax_text.axis('off')
+    # ax_text.tick_params(axis='both', color=None, length=0)
+    ax_text.spines["right"].set_color("none")
+    ax_text.spines["left"].set_color("none")
+    ax_text.spines["top"].set_color("none")
+    ax_text.spines["bottom"].set_color("none")
+
+
+    fsize = 20
+    label_x = 0.04
+    value_x = 0.25
+    ax_text.text(label_x, 0.1, "Number of orders", fontsize=fsize)
+    ax_text.text(value_x, 0.1, "{:,} (contracted: {:,}, canceled: {:,}, active: {:,})".format(
+        result['num_of_orders'], result['num_of_completed_orders'], result['num_of_canceled_orders'], result['num_of_active_orders']), fontsize=fsize)
+
+    ax_text.text(label_x, 0.2, "Number of executions", fontsize=fsize)
+    ax_text.text(value_x, 0.2, "{:,}".format(result['num_of_executions']), fontsize=fsize)
+
+    ax_text.text(label_x, 0.3, "Profit and Loss", fontsize=fsize)
+    ax_text.text(value_x, 0.3, "{:,} JPY".format(result['total_pnl']), fontsize=fsize)
+
+    ax_text.text(label_x, 0.4, "Size of executions", fontsize=fsize)
+    ax_text.text(value_x, 0.4, "{:,.8} BTC".format(result['size_of_executions']), fontsize=fsize)
+
+    ax_text.text(label_x, 0.5, "Win percent", fontsize=fsize)
+    ax_text.text(value_x, 0.5, "{:.2%} (win: {:,}, lose: {:,}, even: {:,})".format(
+        result['num_of_win'] / result['num_of_completed_orders'],
+        result['num_of_win'], result['num_of_lose'], result['num_of_even']), fontsize=fsize)
+
+    ax_text.text(0.02, 0.6, "Test result", fontsize=28)
+
+    # テキスト２
+    ax_text_r = axes[0][1]  # type: Axes
+    ax_text_r.axis('off')
+    ax_text_r.spines["right"].set_color("none")
+    ax_text_r.spines["left"].set_color("none")
+    ax_text_r.spines["top"].set_color("none")
+    ax_text_r.spines["bottom"].set_color("none")
+
+    ax_text.text(0.8, 0.8, "Back Test Report 2019-02-14 19:00", fontsize=32)
+
     # plt.suptitle('bakt', fontsize=32)
     # plt.subplots_adjust(hspace=0.9)
+
     plt.savefig('./hoge.png')
     plt.show()
