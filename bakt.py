@@ -12,7 +12,7 @@ from typing import List
 import pandas as pd
 import time
 
-from baktlib import bktrepo
+from baktlib import bktrepo, config
 from baktlib.constants import *
 from baktlib.helpers import bitflyer
 from baktlib.helpers.calc import d, sub
@@ -21,24 +21,6 @@ from baktlib.models import Order, Position
 logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
 logger = getLogger(__name__)
 pd.set_option('display.width', 300)
-
-order_expire_sec = 2  # type: int
-"""注文の有効時間（秒）"""
-
-delay_order_creation_sec = 1  # type: float
-"""注文が板乗りするまでの時間（秒）"""
-
-timeframe_sec = 5  # type: int
-"""取引の時間間隔（秒）"""
-
-num_of_trade = 100  # type: int
-"""トレードの施行回数（時間枠の数）
-
-timeframe_secで指定した時間間隔を一つの時間枠とし、num_of_tradeで指定した回数分、時間を進めてトレードを実行します。
-よって、シミュレートする時間は、timeframe_sec * num_of_tradeとなります。
-この時間に相当するテストデータが必要です。
-
-"""
 
 orders = []  # type: List[Order]
 trades = []  # type: List[Position]
@@ -56,7 +38,7 @@ ltp_hst = []
 buy_volume = []
 sell_volume = []
 times = []
-his_orders = []
+his_orders = []  # type: List[Orders]
 
 # measurement
 time_sum_unrealized_pnl = []
@@ -120,14 +102,14 @@ def get_active_orders(dt: datetime) -> List[Order]:
     :param dt: 現在日時
     :return: 有効な注文の一覧
     """
-    return [o for o in orders if o.is_active() and (dt - o.created_at).seconds >= delay_order_creation_sec]
+    return [o for o in orders if o.is_active() and (dt - o.created_at).seconds >= conf.delay_order_creation_sec]
 
 
 def cancel_expired_orders(dt: datetime) -> None:
     """有効期限を過ぎた注文のステータスを有効期限切れに更新します。
     :param dt: 現在日時
     """
-    for o in [o for o in get_active_orders(dt) if (dt - o.created_at).seconds > order_expire_sec]:
+    for o in [o for o in get_active_orders(dt) if (dt - o.created_at).seconds > conf.order_expire_sec]:
         o.cancel()
 
 
@@ -228,11 +210,11 @@ def run(executions: pd.DataFrame):
 
     executions['exec_date'] = pd.to_datetime(executions['exec_date'])
     since = executions.at[0, 'exec_date']
-    until = since + timedelta(seconds=timeframe_sec)
+    until = since + timedelta(seconds=conf.timeframe_sec)
     trade_num = 1  # type: int
     logger.info(f"Start to trading. time: {since}")
 
-    while trade_num <= num_of_trade:
+    while trade_num <= conf.num_of_trade:
 
         if trade_num % 100 == 0:
             logger.info(f"Start to trading. No: {trade_num}, Time: {until}")
@@ -285,7 +267,7 @@ def run(executions: pd.DataFrame):
 
         # 時間を進める
         since = until
-        until = since + timedelta(seconds=timeframe_sec)
+        until = since + timedelta(seconds=conf.timeframe_sec)
         trade_num += 1
         logger.debug(f"End trading.\n")
 
@@ -319,14 +301,14 @@ def think(dt: datetime, executions: pd.DataFrame) -> List[Order]:
     if ls >= th:
         new_orders.append(Order(id=get_order_id(),
                                 created_at=dt,
-                                side=SIDE_BUY,
+                                side=SIDE_SELL,
                                 _type=ORDER_TYPE_LIMIT,
                                 size=1 + (psize if has_sell else 0),
                                 price=ltp))
     elif ls <= -th:
         new_orders.append(Order(id=get_order_id(),
                                 created_at=dt,
-                                side=SIDE_SELL,
+                                side=SIDE_BUY,
                                 _type=ORDER_TYPE_LIMIT,
                                 size=1 + (psize if has_buy else 0),
                                 price=ltp))
@@ -339,12 +321,18 @@ if __name__ == '__main__':
 
     # Parse arguments
     parser = ArgumentParser()
+    parser.add_argument('-c', '--config', required=False, action='store', dest='config', help='')
     parser.add_argument('-f', '--file', required=False, action='store', dest='file', help='')
     args = parser.parse_args()
 
-    # 引数で指定されたデータファイルが存在しない場合はエラーで終了させる
+    # 引数で指定されたファイルが存在しない場合はエラーで終了させる
+    if not os.path.exists(args.config):
+        raise FileNotFoundError(f"File not found. [{args.config}]")
     if not os.path.exists(args.file):
         raise FileNotFoundError(f"File not found. [{args.file}]")
+
+    # 設定ファイルを読み込む
+    conf = config.Config(args.config)
 
     # 約定履歴ファイルを読み込む
     data = pd.read_csv(args.file, dtype={'exec_date': 'str',

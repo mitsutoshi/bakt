@@ -5,9 +5,10 @@ from decimal import Decimal
 from logging import getLogger
 
 from baktlib.constants import *
-from baktlib.helpers.calc import d, add, sub
+from baktlib.helpers.calc import d
 
 logger = getLogger(__name__)
+
 
 
 class Order(object):
@@ -58,7 +59,7 @@ class Order(object):
                 assert exec_price >= self.price, m
 
         # 約定サイズが注文サイズを超えていないかチェック
-        assert exec_size <= self.open_size,\
+        assert exec_size <= self.open_size, \
             f"Size is too large. [{self.id}, exec_size={exec_size}, open_size={self.open_size}]"
 
         self.open_size = round(float(Decimal(self.open_size) - Decimal(exec_size)), 8)
@@ -100,7 +101,8 @@ class Execution(object):
 
 class Position(object):
 
-    def __init__(self, id: int, opened_at: datetime, side: str, open_price: float, amount: float, fee_rate: float, open_order_id: int):
+    def __init__(self, id: int, opened_at: datetime, side: str, open_price: float, amount: float, fee_rate: float,
+                 open_order_id: int):
         self.id = id
         self.open_order_id = open_order_id
         self.opened_at = opened_at
