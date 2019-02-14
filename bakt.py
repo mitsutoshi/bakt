@@ -28,8 +28,17 @@ order_expire_sec = 2  # type: int
 delay_order_creation_sec = 1  # type: float
 """注文が板乗りするまでの時間（秒）"""
 
-timeframe_sec = 2  # type: int
+timeframe_sec = 5  # type: int
 """取引の時間間隔（秒）"""
+
+num_of_trade = 100  # type: int
+"""トレードの施行回数（時間枠の数）
+
+timeframe_secで指定した時間間隔を一つの時間枠とし、num_of_tradeで指定した回数分、時間を進めてトレードを実行します。
+よって、シミュレートする時間は、timeframe_sec * num_of_tradeとなります。
+この時間に相当するテストデータが必要です。
+
+"""
 
 orders = []  # type: List[Order]
 trades = []  # type: List[Position]
@@ -46,6 +55,8 @@ unrealized_pnl = []  # type: List[float]
 ltp_hst = []
 buy_volume = []
 sell_volume = []
+times = []
+his_orders = []
 
 # measurement
 time_sum_unrealized_pnl = []
@@ -79,7 +90,7 @@ def sum_current_sell_pos_size() -> float:
 
 
 def sum_unrealized_pnl(ltp: float) -> float:
-    """未実現損益をの金額を返します。
+    """未実現損益の金額を返します。
     最終取引価格（ltp）に基づいて、保有中のポジションの未実現損益（含み損益）を計算して返します。
     :param ltp: 最終取引価格
     :return: 未実現損益
@@ -103,13 +114,21 @@ def get_order_id():
 
 
 def get_active_orders(dt: datetime) -> List[Order]:
+    """有効な注文の一覧を返します。
+    作成された注文が有効であるかの判断には、ステータスに加え、板乗りまでの時間も考慮します。
+    作成されてから一定時間（delay_order_creation_sec）が経過した注文を有効と判断します。
+    :param dt: 現在日時
+    :return: 有効な注文の一覧
+    """
     return [o for o in orders if o.is_active() and (dt - o.created_at).seconds >= delay_order_creation_sec]
 
 
 def cancel_expired_orders(dt: datetime) -> None:
-    for o in get_active_orders(dt):
-        if (dt - o.created_at).seconds > order_expire_sec:
-            o.cancel()
+    """有効期限を過ぎた注文のステータスを有効期限切れに更新します。
+    :param dt: 現在日時
+    """
+    for o in [o for o in get_active_orders(dt) if (dt - o.created_at).seconds > order_expire_sec]:
+        o.cancel()
 
 
 def contract(execution, active_orders: List[Order]):
@@ -213,7 +232,7 @@ def run(executions: pd.DataFrame):
     trade_num = 1  # type: int
     logger.info(f"Start to trading. time: {since}")
 
-    while trade_num <= 1000:
+    while trade_num <= num_of_trade:
 
         if trade_num % 100 == 0:
             logger.info(f"Start to trading. No: {trade_num}, Time: {until}")
@@ -248,10 +267,13 @@ def run(executions: pd.DataFrame):
 
         # シグナル探索&発注
         st_think = time.time()
-        think(until, executions[executions['exec_date'] < until])
+        new_orders = think(until, executions[executions['exec_date'] < until])
+        if new_orders:
+            orders.extend(new_orders)
         time_think.append(time.time() - st_think)
 
         # 時間枠ごとに状況を記録する
+        times.append(until)
         buy_pos_size.append(sum_current_buy_pos_size())
         sell_pos_size.append(sum_current_sell_pos_size())
         realized_pnl.append(sum([t.pnl for t in trades]))
@@ -259,6 +281,7 @@ def run(executions: pd.DataFrame):
         ltp_hst.append(ltp)
         buy_volume.append(round(float(new_executions[new_executions['side'] == 'BUY']['size'].sum()), 8))
         sell_volume.append(round(float(new_executions[new_executions['side'] == 'SELL']['size'].sum()) * -1, 8))
+        his_orders.append(new_orders)
 
         # 時間を進める
         since = until
@@ -267,39 +290,47 @@ def run(executions: pd.DataFrame):
         logger.debug(f"End trading.\n")
 
 
-def think(dt: datetime, executions: pd.DataFrame) -> None:
+def think(dt: datetime, executions: pd.DataFrame) -> List[Order]:
     ltp = float(executions.tail(1).iat[0, 3])  # type: float
-    t = bitflyer.conv_exec_to_ohlc(executions, str(timeframe_sec) + 's').tail(2)
-    # t['ls_diff'] = t['buy_size']['buy_size'] - t['sell_size']['sell_size']
-    bs = t['buy_size'].values[0]
-    ss = t['sell_size'].values[0]
-    if bs > ss:
-        ls = bs / ss * (bs + ss) if ss else 0.5
-    elif bs < ss:
-        ls = ss / bs * (bs + ss) * -1 if bs else 0.5
-    else:
-        ls = 0
+
+    window = 5
+    t = bitflyer.conv_exec_to_ohlc(executions, str(1) + 's').tail(window)  # type: pd.DataFrame
+    ls_diff = t['buy_size']['buy_size'] - t['sell_size']['sell_size']
+    ls_diff_5 = ls_diff.rolling(window, min_periods=window).sum().fillna(0)  # type: pd.Series
+    ls = ls_diff_5.tail(1).values[0]
+    print(ls)
+
+    # bs = t['buy_size'].values[0]
+    # ss = t['sell_size'].values[0]
+    # if bs > ss:
+    #     ls = bs / ss * (bs + ss) if ss else 0.5
+    # elif bs < ss:
+    #     ls = ss / bs * (bs + ss) * -1 if bs else 0.5
+    # else:
+    #     ls = 0
     logger.debug(f"[think] {dt}, L/S Score: {ls}")
 
     psize = sum_current_pos_size()
     has_buy = positions and positions[0].side == 'BUY'
     has_sell = positions and positions[0].side == 'SELL'
 
-    th = 100
+    new_orders = []  # type: List[Order]
+    th = 10
     if ls >= th:
-        orders.append(Order(id=get_order_id(),
-                            created_at=dt,
-                            side=SIDE_BUY,
-                            _type=ORDER_TYPE_LIMIT,
-                            size=1 + (psize if has_sell else 0),
-                            price=ltp))
+        new_orders.append(Order(id=get_order_id(),
+                                created_at=dt,
+                                side=SIDE_BUY,
+                                _type=ORDER_TYPE_LIMIT,
+                                size=1 + (psize if has_sell else 0),
+                                price=ltp))
     elif ls <= -th:
-        orders.append(Order(id=get_order_id(),
-                            created_at=dt,
-                            side=SIDE_SELL,
-                            _type=ORDER_TYPE_LIMIT,
-                            size=1 + (psize if has_buy else 0),
-                            price=ltp))
+        new_orders.append(Order(id=get_order_id(),
+                                created_at=dt,
+                                side=SIDE_SELL,
+                                _type=ORDER_TYPE_LIMIT,
+                                size=1 + (psize if has_buy else 0),
+                                price=ltp))
+    return new_orders
 
 
 if __name__ == '__main__':
@@ -331,7 +362,7 @@ if __name__ == '__main__':
     bktrepo.print_executions(orders)
     bktrepo.print_trades(trades)
     bktrepo.print_graph(data, trades, buy_pos_size, sell_pos_size, realized_pnl, unrealized_pnl, ltp_hst, buy_volume,
-                        sell_volume)
+                        sell_volume, times, his_orders)
 
     # order
     print(f"Number of order: {len(orders)}")
@@ -347,14 +378,23 @@ if __name__ == '__main__':
 
     print(f"Number of contracts: {len(executions)}")
     print(f"Total size of contracts: {float(sum([Decimal(e.size) for e in executions]))}")
-    print(f"Number of trades: {len(trades) * 2}")
     print(f"Total order size: {round(float(sum([d(o.size) for o in orders])), 8) if orders else 0}")
     print(f"Total pnl: {sum([t.pnl for t in trades])}")
 
-    # time
+    win_trades = [t for t in trades if t.pnl > 0]
+    lose_trades = [t for t in trades if t.pnl < 0]
+    even_trades = [t for t in trades if t.pnl == 0]
+
+    print(f"Number of positions: {len(trades)}")
+    print(f"Number of win: {len(win_trades)}")
+    print(f"Number of lose: {len(lose_trades)}")
+    print(f"Number of even: {len(even_trades)}")
+    if trades:
+        print(f"Win percent: {(len(win_trades) / len(trades) * 100):.2%}")
+
     print(f"time_sum_current_pos_size: {sum(time_sum_current_pos_size)}")
     print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")
     print(f"time_think: {sum(time_think)}")
     print(f"time_cancel: {sum(time_cancel)}")
-
     print(f"Time: {time.time() - st}")
+    print(times)
