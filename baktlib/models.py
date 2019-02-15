@@ -46,9 +46,10 @@ class Order(object):
         self.delay_sec = delay_sec  # type: int
         """この注文が約定可能になるまでの遅延時間（秒）"""
 
-        self.expire_sec = expire_sec  # type: int
+        self.expire_sec = expire_sec if type == ORDER_TYPE_LIMIT else -1  # type: int
         """この注文の有効時間（秒）
         有効時間を指定することによって、取引所APIが持つ注文の有効期限設定機能や、発注後一定時間が経過した注文をキャンセルする戦略をテストすることが可能です。
+        0は無期限を表します。
         """
 
         self.status = ORDER_STATUS_ACTIVE

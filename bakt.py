@@ -41,6 +41,7 @@ buy_volume = []
 sell_volume = []
 times = []
 his_orders = []  # type: List[Orders]
+until = None  # type: datetime
 
 # measurement
 time_sum_unrealized_pnl = []
@@ -111,7 +112,7 @@ def cancel_expired_orders(dt: datetime) -> None:
     """有効期限を過ぎた注文のステータスを有効期限切れに更新します。
     :param dt: 現在日時
     """
-    for o in [o for o in get_active_orders(dt) if (dt - o.created_at).seconds > o.expire_sec]:
+    for o in [o for o in get_active_orders(dt) if o.expire_sec and (dt - o.created_at).seconds > o.expire_sec]:
         o.cancel()
 
 
@@ -122,6 +123,10 @@ def contract(execution, active_orders: List[Order]):
     exec_size = float(execution['size'])
     exec_side = execution['side']
     logger.debug(f"Execution: date={exec_date}, side={exec_side}, size={exec_size}, price={exec_price}")
+
+    # TODO 成行の場合、注文サイズを満たす約定履歴を消化する前に、次の成行注文が発生してしまう可能性がある。
+    # TODO 本来なら、発動すれば板を食って約定するものだが、シミュレーションのため状況が異なる。
+    # TODO 成行の場合は、約定履歴は価格の参考のみにした方が良いかも。検討する。正確にやるなら板の情報がないと無理。
 
     for o in active_orders:
 
@@ -136,64 +141,64 @@ def contract(execution, active_orders: List[Order]):
             # 約定していないならスキップして次の注文を処理する
             if not buy_ok and not sell_ok:
                 continue
-
-            can_exec_size_by_order = min(o.open_size, exec_size)  # type: float
-
-            # 保有中のポジションから決済対象となるポジションを抽出
-            reverse_positions = [p for p in positions if (
-                buy_ok and p.side == SIDE_SELL) or (sell_ok and p.side == SIDE_BUY)]
-
-            # 決済対象のポジションが存在しない場合
-            if not reverse_positions:
-
-                position_id += 1
-                positions.append(Position(position_id, exec_date, o.side, o.price, can_exec_size_by_order, 0.0, o.id))
-                o.contract(exec_date, exec_price, can_exec_size_by_order)
-                exec_size = sub(exec_size, can_exec_size_by_order)
-
-            # 決済対象のポジションが存在する場合
-            else:
-
-                # ポジション決済処理
-                for i, p in enumerate(positions):
-
-                    # 注文と同じsideのポジションはスキップ
-                    if (buy_ok and p.side == SIDE_BUY) or (sell_ok and p.side == SIDE_SELL):
-                        continue
-
-                    # ポジションの一部を決済
-                    if p.open_amount - can_exec_size_by_order > 0:
-                        p.close(exec_date, exec_price, can_exec_size_by_order)
-                        o.contract(exec_date, exec_price, can_exec_size_by_order)
-                        exec_size = sub(exec_size, can_exec_size_by_order)
-
-                        # この注文と約定履歴の約定可能量を消化しきっているため、ゼロで更新
-                        can_exec_size_by_order = 0
-
-                    # ポジションの全部を決済
-                    else:
-
-                        # 約定履歴の持つ約定量からこのポジション決済によって、約定した分を減らす
-                        exec_size = sub(exec_size, p.open_amount)
-
-                        # この注文と約定履歴の約定可能量を更新
-                        can_exec_size_by_order = sub(can_exec_size_by_order, p.open_amount)
-
-                        # 約定した量の分を注文に反映
-                        o.contract(exec_date, exec_price, p.open_amount)
-
-                        # 残りのポジションを全てクローズ
-                        p.close(exec_date, exec_price, p.open_amount)
-                        trades.append(p)
-                        del positions[i]
-
-                    # 発注量を消化しきったらpositionsのループをbreakして次の注文の処理へ
-                    if can_exec_size_by_order == 0:
-                        break
         else:
 
-            # TODO market注文対応
-            raise ValueError('Not support order type of market.')
+            buy_ok = o.side == SIDE_BUY and exec_side == SIDE_SELL
+            sell_ok = o.side == SIDE_SELL and exec_side == SIDE_BUY
+
+        can_exec_size_by_order = min(o.open_size, exec_size)  # type: float
+
+        # 保有中のポジションから決済対象となるポジションを抽出
+        reverse_positions = [p for p in positions if (
+            buy_ok and p.side == SIDE_SELL) or (sell_ok and p.side == SIDE_BUY)]
+
+        # 決済対象のポジションが存在しない場合
+        if not reverse_positions:
+
+            position_id += 1
+            positions.append(Position(position_id, exec_date, o.side, o.price, can_exec_size_by_order, 0.0, o.id))
+            o.contract(exec_date, exec_price, can_exec_size_by_order)
+            exec_size = sub(exec_size, can_exec_size_by_order)
+
+        # 決済対象のポジションが存在する場合
+        else:
+
+            # ポジション決済処理
+            for i, p in enumerate(positions):
+
+                # 注文と同じsideのポジションはスキップ
+                if (buy_ok and p.side == SIDE_BUY) or (sell_ok and p.side == SIDE_SELL):
+                    continue
+
+                # ポジションの一部を決済
+                if p.open_amount - can_exec_size_by_order > 0:
+                    p.close(exec_date, exec_price, can_exec_size_by_order)
+                    o.contract(exec_date, exec_price, can_exec_size_by_order)
+                    exec_size = sub(exec_size, can_exec_size_by_order)
+
+                    # この注文と約定履歴の約定可能量を消化しきっているため、ゼロで更新
+                    can_exec_size_by_order = 0
+
+                # ポジションの全部を決済
+                else:
+
+                    # 約定履歴の持つ約定量からこのポジション決済によって、約定した分を減らす
+                    exec_size = sub(exec_size, p.open_amount)
+
+                    # この注文と約定履歴の約定可能量を更新
+                    can_exec_size_by_order = sub(can_exec_size_by_order, p.open_amount)
+
+                    # 約定した量の分を注文に反映
+                    o.contract(exec_date, exec_price, p.open_amount)
+
+                    # 残りのポジションを全てクローズ
+                    p.close(exec_date, exec_price, p.open_amount)
+                    trades.append(p)
+                    del positions[i]
+
+                # 発注量を消化しきったらpositionsのループをbreakして次の注文の処理へ
+                if can_exec_size_by_order == 0:
+                    break
 
         # exec_sizeを消化しきっており、これ以上約定させられないため、処理を終了する
         if exec_size == 0:
@@ -201,6 +206,9 @@ def contract(execution, active_orders: List[Order]):
 
 
 def run(executions: pd.DataFrame):
+
+    global until
+
     logger.info(f"Start to trading. number of executions: ")
     logger.info(f"Execution histories:")
     logger.info(f"  length: {len(executions):,}")
@@ -274,6 +282,8 @@ def run(executions: pd.DataFrame):
         logger.debug(f"End trading.\n")
 
 
+
+
 if __name__ == '__main__':
 
     st = time.time()
@@ -328,10 +338,11 @@ if __name__ == '__main__':
         # Conditions
         'datetime': datetime.now().strftime(DATETIME_F),
         'duration': time.time() - st,
+        'exchange': conf.exchange,
 
-        # Conditions
+        # Test Conditions
         'data_from': data.at[0, 'exec_date'].to_pydatetime().strftime(DATETIME_F),
-        'data_to': data.at[len(data) - 1, 'exec_date'].to_pydatetime().strftime(DATETIME_F),
+        'data_to': until.strftime(DATETIME_F),
         'data_length': len(data),
         'timeframe_sec': conf.timeframe_sec,
         'num_of_timeframes': conf.num_of_trade,
@@ -368,8 +379,8 @@ if __name__ == '__main__':
         'last_prices': ltp_hst,
         'buy_pos_size': buy_pos_size,
         'sell_pos_size': sell_pos_size,
-        'realized_pnl': realized_pnl,
-        'unrealized_pnl': unrealized_pnl,
+        'realized_gain': realized_pnl,
+        'unrealized_gain': unrealized_pnl,
         'market_buy_size': buy_volume,
         'market_sell_size': sell_volume,
         'pnl_per_trade': [t.pnl for t in trades],
@@ -379,17 +390,19 @@ if __name__ == '__main__':
         'num_of_win': num_of_win,
         'num_of_lose': num_of_lose,
         'num_of_even': num_of_even,
-        'win_rate': num_of_win / num_of_trades,
+        'win_rate': num_of_win / num_of_trades if num_of_trades else 0,
         'profit': round(sum([d(t.pnl) for t in trades if t.pnl > 0])),
         'loss': round(sum([d(t.pnl) for t in trades if t.pnl < 0])),
         'total_pnl': round(sum([d(t.pnl) for t in trades])),
     }
 
-    # bktrepo.print_orders(orders)
+    s = time.time()
+    bktrepo.print_orders(orders)
     # bktrepo.print_executions(orders)
-    # bktrepo.print_trades(trades)
-    # bktrepo.print_positions(positions)
+    bktrepo.print_trades(trades)
+    bktrepo.print_positions(positions)
     bktrepo.print_graph(his_orders, result)
+    time_print = time.time() - s
 
     print(f"Number of contracts: {len(executions_me)}")
     print(f"Total size of contracts: {float(sum([Decimal(e.size) for e in executions_me]))}")
@@ -400,7 +413,7 @@ if __name__ == '__main__':
     print(f"Number of wins: {result['num_of_win']}")
     print(f"Number of lose: {result['num_of_lose']}")
     print(f"Number of even: {result['num_of_even']}")
-    print(f"win_rate: {result['num_of_win'] / result['num_of_trades']}")
+    print(f"Win %: {result['win_rate']:%}")
     print(f"Closed of postion: {result['size_of_closed_executions']}")
     print(f"Unclosed position: {result['size_of_unclosed_executions']}")
     print(f"Total pnl: {sum([t.pnl for t in trades])}")
@@ -408,4 +421,5 @@ if __name__ == '__main__':
     print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")
     print(f"time_think: {sum(time_think)}")
     print(f"time_cancel: {sum(time_cancel)}")
+    print(f"time_print: {time_print}")
     print(f"Time: {time.time() - st}")
