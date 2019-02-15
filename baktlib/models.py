@@ -10,11 +10,11 @@ from baktlib.helpers.calc import d
 logger = getLogger(__name__)
 
 
-
 class Order(object):
     """注文情報"""
 
-    def __init__(self, id: int, created_at: datetime, side: str, _type: str, size: float, price: float = 0) -> None:
+    def __init__(self, id: int, created_at: datetime, side: str, _type: str, size: float,
+                 price: float = 0, delay_sec: int = 0, expire_sec: int = 0) -> None:
 
         if not id:
             raise ValueError(f"id is required.")
@@ -28,12 +28,29 @@ class Order(object):
             raise ValueError(f"The size must be a number greater than 0. [size='{size}']")
 
         self.id = id
+
         self.created_at = created_at
+        """注文作成日時"""
+
         self.side = side
+        """"注文種別（BUY or SELL）"""
+
         self.type = _type
+
         self.price = price
+
         self.size = size
+
         self.open_size = size
+
+        self.delay_sec = delay_sec  # type: int
+        """この注文が約定可能になるまでの遅延時間（秒）"""
+
+        self.expire_sec = expire_sec  # type: int
+        """この注文の有効時間（秒）
+        有効時間を指定することによって、取引所APIが持つ注文の有効期限設定機能や、発注後一定時間が経過した注文をキャンセルする戦略をテストすることが可能です。
+        """
+
         self.status = ORDER_STATUS_ACTIVE
         self.executions = []  # type: List
         logger.debug(f"Order was created. {self}")
@@ -103,6 +120,7 @@ class Position(object):
 
     def __init__(self, id: int, opened_at: datetime, side: str, open_price: float, amount: float, fee_rate: float,
                  open_order_id: int):
+
         self.id = id
         self.open_order_id = open_order_id
         self.opened_at = opened_at

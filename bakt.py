@@ -12,15 +12,17 @@ from typing import List
 import pandas as pd
 import time
 
+import strategy
 from baktlib import bktrepo, config
 from baktlib.constants import *
-from baktlib.helpers.calc import d, sub
+from baktlib.helpers.calc import d, sub, sum_size
 from baktlib.models import Order, Position
-import strategy
 
 logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
 logger = getLogger(__name__)
 pd.set_option('display.width', 300)
+pd.set_option('display.max_rows', 300)
+DATETIME_F = '%Y-%m-%d %H:%M:%S'
 
 orders = []  # type: List[Order]
 trades = []  # type: List[Position]
@@ -102,14 +104,14 @@ def get_active_orders(dt: datetime) -> List[Order]:
     :param dt: 現在日時
     :return: 有効な注文の一覧
     """
-    return [o for o in orders if o.is_active() and (dt - o.created_at).seconds >= conf.delay_order_creation_sec]
+    return [o for o in orders if o.is_active() and (dt - o.created_at).seconds >= o.delay_sec]
 
 
 def cancel_expired_orders(dt: datetime) -> None:
     """有効期限を過ぎた注文のステータスを有効期限切れに更新します。
     :param dt: 現在日時
     """
-    for o in [o for o in get_active_orders(dt) if (dt - o.created_at).seconds > conf.order_expire_sec]:
+    for o in [o for o in get_active_orders(dt) if (dt - o.created_at).seconds > o.expire_sec]:
         o.cancel()
 
 
@@ -200,10 +202,10 @@ def contract(execution, active_orders: List[Order]):
 
 def run(executions: pd.DataFrame):
     logger.info(f"Start to trading. number of executions: ")
-    logger.info(f"Executions:")
-    logger.info(f"  number: {len(executions):,}")
-    logger.info(f"  since: {executions.head(1).iat[0, 0]}")
-    logger.info(f"  until: {executions.tail(1).iat[0, 0]}")
+    logger.info(f"Execution histories:")
+    logger.info(f"  length: {len(executions):,}")
+    logger.info(f"  from: {executions.head(1).iat[0, 0]}")
+    logger.info(f"  to: {executions.tail(1).iat[0, 0]}")
 
     if executions.empty:
         raise ValueError()
@@ -249,7 +251,7 @@ def run(executions: pd.DataFrame):
 
         # シグナル探索&発注
         st_think = time.time()
-        new_orders = strategy.think(until, executions[executions['exec_date'] < until], positions)
+        new_orders = strategy.think(trade_num, until, executions[executions['exec_date'] < until], positions, user_settings)
         if new_orders:
             orders.extend(new_orders)
         time_think.append(time.time() - st_think)
@@ -272,38 +274,6 @@ def run(executions: pd.DataFrame):
         logger.debug(f"End trading.\n")
 
 
-# def think(dt: datetime, executions: pd.DataFrame) -> List[Order]:
-#     ltp = float(executions.tail(1).iat[0, 3])  # type: float
-#     window = 5
-#     t = bitflyer.conv_exec_to_ohlc(executions, str(1) + 's').tail(window)  # type: pd.DataFrame
-#     ls_diff = t['buy_size']['buy_size'] - t['sell_size']['sell_size']
-#     ls_diff_5 = ls_diff.rolling(window, min_periods=window).sum().fillna(0)  # type: pd.Series
-#     ls = ls_diff_5.tail(1).values[0]
-#     logger.debug(f"[think] {dt}, L/S Score: {ls}")
-#
-#     psize = sum_current_pos_size()
-#     has_buy = positions and positions[0].side == 'BUY'
-#     has_sell = positions and positions[0].side == 'SELL'
-#
-#     new_orders = []  # type: List[Order]
-#     th = 10
-#     if ls >= th:
-#         new_orders.append(Order(id=get_order_id(),
-#                                 created_at=dt,
-#                                 side=SIDE_SELL,
-#                                 _type=ORDER_TYPE_LIMIT,
-#                                 size=1 + (psize if has_sell else 0),
-#                                 price=ltp))
-#     elif ls <= -th:
-#         new_orders.append(Order(id=get_order_id(),
-#                                 created_at=dt,
-#                                 side=SIDE_BUY,
-#                                 _type=ORDER_TYPE_LIMIT,
-#                                 size=1 + (psize if has_buy else 0),
-#                                 price=ltp))
-#     return new_orders
-
-
 if __name__ == '__main__':
 
     st = time.time()
@@ -321,7 +291,10 @@ if __name__ == '__main__':
         raise FileNotFoundError(f"File not found. [{args.file}]")
 
     # 設定ファイルを読み込む
-    conf = config.Config(args.config)
+    conf = config.Config(args.config)  # type: config.Config
+    user_settings = {}  # type: dict
+    for k, v in conf.user.items():
+        user_settings.update({str(k): v})
 
     # 約定履歴ファイルを読み込む
     data = pd.read_csv(args.file, dtype={'exec_date': 'str',
@@ -339,67 +312,100 @@ if __name__ == '__main__':
     for o in orders:
         executions_me.extend(o.executions)
 
-
-    t_trades = pd.DataFrame(data={'open_order_id': [t.open_order_id for t in trades],
-                                  'pnl': [t.pnl for t in trades]})
+    # クローズしたポジションを注文IDごとにグルーピングする
+    t_trades = pd.DataFrame(data={'open_order_id': [t.open_order_id for t in trades], 'pnl': [t.pnl for t in trades]})
     t_pnl_by_order = t_trades.groupby('open_order_id').sum()
+    num_of_trades = len(t_pnl_by_order)
     num_of_win = len(t_pnl_by_order[t_pnl_by_order['pnl'] > 0])
     num_of_lose = len(t_pnl_by_order[t_pnl_by_order['pnl'] < 0])
     num_of_even = len(t_pnl_by_order[t_pnl_by_order['pnl'] == 0])
+    size_of_orders = round(float(sum([d(o.size) for o in orders])), 8) if orders else 0
+    size_of_executions = float(sum([Decimal(e.size) for e in executions_me]))
 
+    # テスト結果
+    result = {
 
-    result = {'num_of_orders': len(orders),
-              'num_of_buy_orders': len([o for o in orders if o.side == SIDE_BUY]),
-              'num_of_sell_orders': len([o for o in orders if o.side == SIDE_SELL]),
-              'num_of_limit_orders': len([o for o in orders if o.type == ORDER_TYPE_LIMIT]),
-              'num_of_market_orders': len([o for o in orders if o.type == ORDER_TYPE_MARKET]),
-              'num_of_completed_orders': len([o for o in orders if o.status == ORDER_STATUS_COMPLETED]),
-              'num_of_canceled_orders': len([o for o in orders if o.status == ORDER_STATUS_CANCELED]),
-              'num_of_active_orders': len([o for o in orders if o.status == ORDER_STATUS_ACTIVE]),
+        # Conditions
+        'datetime': datetime.now().strftime(DATETIME_F),
+        'duration': time.time() - st,
 
-              'num_of_executions': len(executions_me),
-              'size_of_executions': float(sum([Decimal(e.size) for e in executions_me])),
-              'price_of_executions': float(sum([Decimal(e.price) * Decimal(e.size) for e in executions_me])),
+        # Conditions
+        'data_from': data.at[0, 'exec_date'].to_pydatetime().strftime(DATETIME_F),
+        'data_to': data.at[len(data) - 1, 'exec_date'].to_pydatetime().strftime(DATETIME_F),
+        'data_length': len(data),
+        'timeframe_sec': conf.timeframe_sec,
+        'num_of_timeframes': conf.num_of_trade,
 
-              'num_of_win': num_of_win,
-              'num_of_lose': num_of_lose,
-              'num_of_even': num_of_even,
+        # Orders
+        'num_of_orders': len(orders),
+        'num_of_buy_orders': len([o for o in orders if o.side == SIDE_BUY]),
+        'num_of_sell_orders': len([o for o in orders if o.side == SIDE_SELL]),
+        'num_of_limit_orders': len([o for o in orders if o.type == ORDER_TYPE_LIMIT]),
+        'num_of_market_orders': len([o for o in orders if o.type == ORDER_TYPE_MARKET]),
+        'num_of_completed_orders': len([o for o in orders if o.status == ORDER_STATUS_COMPLETED]),
+        'num_of_canceled_orders': len([o for o in orders if o.status == ORDER_STATUS_CANCELED]),
+        'num_of_active_orders': len([o for o in orders if o.status == ORDER_STATUS_ACTIVE]),
+        'size_of_orders': size_of_orders,
+        'size_of_limit_orders': sum_size([o.size for o in orders if o.type == ORDER_TYPE_LIMIT]),
+        'size_of_market_orders': sum_size([o.size for o in orders if o.type == ORDER_TYPE_MARKET]),
+        'size_of_completed_orders': sum_size([o.size for o in orders if o.status == ORDER_STATUS_COMPLETED]),
+        'size_of_canceled_orders': sum_size([o.size for o in orders if o.status == ORDER_STATUS_CANCELED]),
+        'size_of_active_orders': sum_size([o.size for o in orders if o.status == ORDER_STATUS_ACTIVE]),
+        'avg_order_size': 1,
 
+        # Executions
+        'num_of_executions': len(executions_me),
+        'size_of_executions': size_of_executions,
+        'price_of_executions': float(sum([Decimal(e.price) * Decimal(e.size) for e in executions_me])),
+        'avg_exec_size': round(size_of_executions / len(executions_me), 8),
+        'exec_rate': round(size_of_executions / size_of_orders, 2),  # 注文サイズに対する約定サイズの割合（サイズに基づく約定率）
 
-              'total_pnl': realized_pnl[-1],
-              }
+        # Positions
+        'size_of_closed_executions': round(float(sum([Decimal(p.amount) for p in trades])), 8),
+        'size_of_unclosed_executions': round(float(sum([Decimal(p.open_amount) for p in positions])), 8),
 
-    bktrepo.print_orders(orders)
-    bktrepo.print_executions(orders)
-    bktrepo.print_trades(trades)
-    bktrepo.print_graph(data, trades, buy_pos_size, sell_pos_size, realized_pnl, unrealized_pnl, ltp_hst, buy_volume,
-                        sell_volume, times, his_orders, executions_me, result)
+        # history
+        'last_prices': ltp_hst,
+        'buy_pos_size': buy_pos_size,
+        'sell_pos_size': sell_pos_size,
+        'realized_pnl': realized_pnl,
+        'unrealized_pnl': unrealized_pnl,
+        'market_buy_size': buy_volume,
+        'market_sell_size': sell_volume,
+        'pnl_per_trade': [t.pnl for t in trades],
 
-    # order
-    print(f"Number of canceled order: {len([o for o in orders if o.status == ORDER_STATUS_CANCELED])}")
-    print(f"Number of limit order: {len([o for o in orders if o.type == ORDER_TYPE_LIMIT])}")
-    print(f"Number of market order: {len([o for o in orders if o.type == ORDER_TYPE_MARKET])}")
+        # Stats
+        'num_of_trades': num_of_trades,
+        'num_of_win': num_of_win,
+        'num_of_lose': num_of_lose,
+        'num_of_even': num_of_even,
+        'win_rate': num_of_win / num_of_trades,
+        'profit': round(sum([d(t.pnl) for t in trades if t.pnl > 0])),
+        'loss': round(sum([d(t.pnl) for t in trades if t.pnl < 0])),
+        'total_pnl': round(sum([d(t.pnl) for t in trades])),
+    }
 
+    # bktrepo.print_orders(orders)
+    # bktrepo.print_executions(orders)
+    # bktrepo.print_trades(trades)
+    # bktrepo.print_positions(positions)
+    bktrepo.print_graph(his_orders, result)
 
     print(f"Number of contracts: {len(executions_me)}")
     print(f"Total size of contracts: {float(sum([Decimal(e.size) for e in executions_me]))}")
-    print(f"Total order size: {round(float(sum([d(o.size) for o in orders])), 8) if orders else 0}")
+    print(f"size_of_orders: {result['size_of_orders']}")
+    print(f"size_of_executions: {result['size_of_executions']}")
+    print(f"約定率: {round(result['size_of_executions'] / result['size_of_orders'], 2):.2%}")
+    print(f"Number of trades: {num_of_trades}")
+    print(f"Number of wins: {result['num_of_win']}")
+    print(f"Number of lose: {result['num_of_lose']}")
+    print(f"Number of even: {result['num_of_even']}")
+    print(f"win_rate: {result['num_of_win'] / result['num_of_trades']}")
+    print(f"Closed of postion: {result['size_of_closed_executions']}")
+    print(f"Unclosed position: {result['size_of_unclosed_executions']}")
     print(f"Total pnl: {sum([t.pnl for t in trades])}")
-
-    win_trades = [t for t in trades if t.pnl > 0]
-    lose_trades = [t for t in trades if t.pnl < 0]
-    even_trades = [t for t in trades if t.pnl == 0]
-
-    print(f"Number of positions: {len(trades)}")
-    print(f"Number of win: {len(win_trades)}")
-    print(f"Number of lose: {len(lose_trades)}")
-    print(f"Number of even: {len(even_trades)}")
-    if trades:
-        print(f"Win percent: {(len(win_trades) / len(trades) * 100):.2%}")
-
     print(f"time_sum_current_pos_size: {sum(time_sum_current_pos_size)}")
     print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")
     print(f"time_think: {sum(time_think)}")
     print(f"time_cancel: {sum(time_cancel)}")
     print(f"Time: {time.time() - st}")
-    print(times)

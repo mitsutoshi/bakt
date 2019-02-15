@@ -1,6 +1,7 @@
 # coding: utf-8
 
 from decimal import Decimal
+from typing import Iterable
 
 
 def d(f: float) -> Decimal:
@@ -27,3 +28,7 @@ def multi(a, b) -> float:
     da = d(a) if type(a) is not Decimal else a
     db = d(b) if type(b) is not Decimal else b
     return round(float(da * db), 8)
+
+
+def sum_size(iterable: Iterable) -> float:
+    return round(float(sum([d(i) for i in iterable])), 8)
