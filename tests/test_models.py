@@ -185,3 +185,8 @@ class PositionTest(unittest.TestCase):
         self.__assert_position(p=p, id=id, opened_at=opened_at, amount=amount, price=price,
                                open_fee=0, open_order_id=open_order_id, closed_at=closed_at,
                                open_amount=0, close_price=price + 75, close_fee=0, pnl=1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
