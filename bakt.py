@@ -206,7 +206,6 @@ def contract(execution, active_orders: List[Order]):
 
 
 def run(executions: pd.DataFrame):
-
     global until
 
     logger.info(f"Start to trading. number of executions: ")
@@ -259,7 +258,8 @@ def run(executions: pd.DataFrame):
 
         # シグナル探索&発注
         st_think = time.time()
-        new_orders = strategy.think(trade_num, until, executions[executions['exec_date'] < until], positions, user_settings)
+        new_orders = strategy.think(trade_num, until, executions[executions['exec_date'] < until], positions,
+                                    user_settings)
         if new_orders:
             orders.extend(new_orders)
         time_think.append(time.time() - st_think)
@@ -280,8 +280,6 @@ def run(executions: pd.DataFrame):
         until = since + timedelta(seconds=conf.timeframe_sec)
         trade_num += 1
         logger.debug(f"End trading.\n")
-
-
 
 
 if __name__ == '__main__':
@@ -330,7 +328,9 @@ if __name__ == '__main__':
     num_of_lose = len(t_pnl_by_order[t_pnl_by_order['pnl'] < 0])
     num_of_even = len(t_pnl_by_order[t_pnl_by_order['pnl'] == 0])
     size_of_orders = round(float(sum([d(o.size) for o in orders])), 8) if orders else 0
-    size_of_executions = float(sum([Decimal(e.size) for e in executions_me]))
+    size_of_exec = float(sum([Decimal(e.size) for e in executions_me]))
+    profit = round(sum([d(t.pnl) for t in trades if t.pnl > 0]))
+    loss = abs(round(sum([d(t.pnl) for t in trades if t.pnl < 0])))
 
     # テスト結果
     result = {
@@ -359,21 +359,16 @@ if __name__ == '__main__':
         'size_of_orders': size_of_orders,
         'size_of_limit_orders': sum_size([o.size for o in orders if o.type == ORDER_TYPE_LIMIT]),
         'size_of_market_orders': sum_size([o.size for o in orders if o.type == ORDER_TYPE_MARKET]),
-        'size_of_completed_orders': sum_size([o.size for o in orders if o.status == ORDER_STATUS_COMPLETED]),
-        'size_of_canceled_orders': sum_size([o.size for o in orders if o.status == ORDER_STATUS_CANCELED]),
-        'size_of_active_orders': sum_size([o.size for o in orders if o.status == ORDER_STATUS_ACTIVE]),
         'avg_order_size': 1,
 
         # Executions
-        'num_of_executions': len(executions_me),
-        'size_of_executions': size_of_executions,
-        'price_of_executions': float(sum([Decimal(e.price) * Decimal(e.size) for e in executions_me])),
-        'avg_exec_size': round(size_of_executions / len(executions_me), 8),
-        'exec_rate': round(size_of_executions / size_of_orders, 2),  # 注文サイズに対する約定サイズの割合（サイズに基づく約定率）
-
-        # Positions
-        'size_of_closed_executions': round(float(sum([Decimal(p.amount) for p in trades])), 8),
-        'size_of_unclosed_executions': round(float(sum([Decimal(p.open_amount) for p in positions])), 8),
+        'num_of_exec': len(executions_me),
+        'size_of_exec': size_of_exec,
+        'price_of_exec': float(sum([Decimal(e.price) * Decimal(e.size) for e in executions_me])),
+        'avg_exec_size': round(size_of_exec / len(executions_me), 8),
+        'exec_rate': round(size_of_exec / size_of_orders, 2),  # 注文サイズに対する約定サイズの割合（サイズに基づく約定率）
+        'size_of_closed_exec': round(float(sum([Decimal(p.amount) for p in trades])), 8),
+        'size_of_unclosed_exec': round(float(sum([Decimal(p.open_amount) for p in positions])), 8),
 
         # history
         'last_prices': ltp_hst,
@@ -391,14 +386,15 @@ if __name__ == '__main__':
         'num_of_lose': num_of_lose,
         'num_of_even': num_of_even,
         'win_rate': num_of_win / num_of_trades if num_of_trades else 0,
-        'profit': round(sum([d(t.pnl) for t in trades if t.pnl > 0])),
-        'loss': round(sum([d(t.pnl) for t in trades if t.pnl < 0])),
-        'total_pnl': round(sum([d(t.pnl) for t in trades])),
+        'profit': profit,
+        'loss': loss,
+        'total_pnl': profit - loss,
+        'pf': round(profit / loss, 2)
     }
 
     s = time.time()
     bktrepo.print_orders(orders)
-    # bktrepo.print_executions(orders)
+    bktrepo.print_executions(orders)
     bktrepo.print_trades(trades)
     bktrepo.print_positions(positions)
     bktrepo.print_graph(his_orders, result)
@@ -407,15 +403,15 @@ if __name__ == '__main__':
     print(f"Number of contracts: {len(executions_me)}")
     print(f"Total size of contracts: {float(sum([Decimal(e.size) for e in executions_me]))}")
     print(f"size_of_orders: {result['size_of_orders']}")
-    print(f"size_of_executions: {result['size_of_executions']}")
-    print(f"約定率: {round(result['size_of_executions'] / result['size_of_orders'], 2):.2%}")
+    print(f"size_of_exec: {result['size_of_exec']}")
+    print(f"約定率: {round(result['size_of_exec'] / result['size_of_orders'], 2):.2%}")
     print(f"Number of trades: {num_of_trades}")
     print(f"Number of wins: {result['num_of_win']}")
     print(f"Number of lose: {result['num_of_lose']}")
     print(f"Number of even: {result['num_of_even']}")
     print(f"Win %: {result['win_rate']:%}")
-    print(f"Closed of postion: {result['size_of_closed_executions']}")
-    print(f"Unclosed position: {result['size_of_unclosed_executions']}")
+    print(f"Closed of postion: {result['size_of_closed_exec']}")
+    print(f"Unclosed position: {result['size_of_unclosed_exec']}")
     print(f"Total pnl: {sum([t.pnl for t in trades])}")
     print(f"time_sum_current_pos_size: {sum(time_sum_current_pos_size)}")
     print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")

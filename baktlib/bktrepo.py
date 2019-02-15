@@ -169,12 +169,12 @@ def print_graph(orders, result):
     ax_text.spines["top"].set_color("none")
     ax_text.spines["bottom"].set_color("none")
 
-    fsize = 18
+    fsize = 19
     label_x = 0.05
     value_x = 0.25
     y_span = 0.06
-    y_subtitle = 0.6
-    y = 0.5
+    y_subtitle = 0.70
+    y = 0.60
 
     ax_text.text(0.01, y_subtitle, "Test result", fontsize=28)
 
@@ -187,22 +187,23 @@ def print_graph(orders, result):
     ax_text.text(value_x, y,
                  f"{result['num_of_orders']:,} (Limit: {result['num_of_limit_orders']:,}"
                  f", Market: {result['num_of_market_orders']:,}"
-                 f" / Buy: {result['num_of_buy_orders']:,}, Sell: {result['num_of_sell_orders']:,})"
-                 , fontsize=fsize)
+                 f" / Buy: {result['num_of_buy_orders']:,}, Sell: {result['num_of_sell_orders']:,})", fontsize=fsize)
     y -= y_span
 
     # 注文サイズ
     ax_text.text(label_x, y, "Size", fontsize=fsize)
-    ax_text.text(value_x, y, f"{result['size_of_orders']:,} BTC (Limit: {result['size_of_limit_orders']},"
-    f" Market: {result['size_of_market_orders']} / Average size: {result['avg_order_size']:,})"
-                 , fontsize=fsize)
+    ax_text.text(value_x, y, "{:,} BTC (Limit: {:,}, Market: {:,} / Average size: {:,})"
+                 .format(result['size_of_orders'],
+                         result['size_of_limit_orders'],
+                         result['size_of_market_orders'],
+                         result['avg_order_size']), fontsize=fsize)
     y -= y_span
 
     ax_text.text(label_x, y, "Status", fontsize=fsize)
-    ax_text.text(value_x, y, f"Completed: {result['num_of_completed_orders']:,} ({result['size_of_limit_orders']} BTC)"
-    f", Canceled: {result['num_of_canceled_orders']} ({result['size_of_canceled_orders']} BTC)"
-    f", Active: {result['num_of_active_orders']} ({result['size_of_active_orders']} BTC)"
-                 , fontsize=fsize)
+    ax_text.text(value_x, y, "Completed: {:,}, Canceled: {:,}, Active: {:,}"
+                 .format(result['num_of_completed_orders'],
+                         result['num_of_canceled_orders'],
+                         result['num_of_active_orders']), fontsize=fsize)
     y -= y_span
 
     # 約定セクション
@@ -210,12 +211,11 @@ def print_graph(orders, result):
     y -= y_span
 
     ax_text.text(label_x, y, "Number of executions", fontsize=fsize)
-    ax_text.text(value_x, y, f"{result['num_of_executions']:,}", fontsize=fsize)
+    ax_text.text(value_x, y, f"{result['num_of_exec']:,}", fontsize=fsize)
     y -= y_span
 
     ax_text.text(label_x, y, "Size", fontsize=fsize)
-    ax_text.text(value_x, y, f"{result['size_of_executions']:,.8} BTC (Closed: {result['size_of_closed_executions']:,}"
-    f" BTC, Unclosed: {result['size_of_unclosed_executions']:,} BTC)", fontsize=fsize)
+    ax_text.text(value_x, y, f"{result['size_of_exec']:,.8} BTC", fontsize=fsize)
     y -= y_span
 
     # 約定率
@@ -224,8 +224,8 @@ def print_graph(orders, result):
     y -= y_span
 
     ax_text.text(0.03, y, "Profit and Loss", fontsize=fsize)
-    ax_text.text(value_x, y, "{:,} JPY (Profit: {:,}, Loss: {:,})".format(
-        result['total_pnl'], result['profit'], result['loss']), fontsize=fsize)
+    ax_text.text(value_x, y, f"{result['total_pnl']:,} JPY (Profit: {result['profit']:,}"
+    f", Loss: {result['loss']:,}, PF: {result['pf']:,})", fontsize=fsize)
     y -= y_span
 
     ax_text.text(0.03, y, "Win %", fontsize=fsize)
@@ -251,7 +251,7 @@ def print_graph(orders, result):
 
     # label_x = 0.05
     # value_x = 0.25
-    y = 0.5
+    y = 0.6
 
     # 通貨ペア
     ax_text_r.text(label_x, y, "Symbol", fontsize=fsize)
@@ -278,7 +278,8 @@ def print_graph(orders, result):
     ax_text_r.text(value_x, y, f"{result['num_of_timeframes']:,}", fontsize=fsize)
     y -= y_span
 
-    ax_text.text(0.65, 0.8, f"Back Test Report {result['datetime']} ({__conv_htime(result['duration'])})", fontsize=32)
+    ax_text.text(0.65, 0.85, f"Back Test Report {result['datetime']} ", fontsize=32)
+    # ({__conv_htime(result['duration'])})
 
     # plt.suptitle('bakt', fontsize=32)
     # plt.subplots_adjust(hspace=0.9)

@@ -172,7 +172,7 @@ class Position(object):
         self.closed_at = exec_date
         self.open_amount = round(float(open_amount - d(exec_size)), 8)
 
-        logger.debug(f"Position was closed({'partial' if self.open_amount else 'full'}). [{self}]")
+        logger.debug(f"Position was closed({'partial' if self.open_amount else 'full'}). {self}")
 
     def __str__(self):
         return f"Position[id={self.id}, side={self.side}, amount={self.amount}, open_order_id={self.open_order_id}, " \
