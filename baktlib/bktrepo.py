@@ -234,6 +234,14 @@ def print_graph(orders, result):
                  fontsize=fsize)
     y -= y_span
 
+    # DD
+    ax_text.text(0.03, y, "DD %", fontsize=fsize)
+    ax_text.text(value_x, y, f"{result['win_rate']:.2%}", fontsize=fsize)
+    y -= y_span
+
+    ax_text.text(0.03, y, "Process time", fontsize=fsize)
+    ax_text.text(value_x, y, f"{__conv_htime(result['duration'])}", fontsize=fsize)
+
     # テキスト２
 
     # test conditions
@@ -278,13 +286,14 @@ def print_graph(orders, result):
     ax_text_r.text(value_x, y, f"{result['num_of_timeframes']:,}", fontsize=fsize)
     y -= y_span
 
-    ax_text.text(0.65, 0.85, f"Back Test Report {result['datetime']} ", fontsize=32)
-    # ({__conv_htime(result['duration'])})
+    ax_text.text(0.8, 0.85, f"Back Test Report {result['datetime']} ", fontsize=32)
 
     # plt.suptitle('bakt', fontsize=32)
     # plt.subplots_adjust(hspace=0.9)
 
-    plt.savefig('./hoge.png')
+    from datetime import datetime
+    timestamp = datetime.strptime(result['datetime'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d%H%M%S')
+    plt.savefig(f"./bakt_report_{timestamp}.png")
     plt.show()
 
 
