@@ -389,7 +389,7 @@ if __name__ == '__main__':
         'profit': profit,
         'loss': loss,
         'total_pnl': profit - loss,
-        'pf': round(profit / loss, 2)
+        'pf': round(profit / loss, 2) if loss else 0.0
     }
 
     s = time.time()
