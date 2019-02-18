@@ -10,6 +10,7 @@ from logging import getLogger
 from typing import List
 
 import pandas as pd
+import numpy as np
 import time
 
 import strategy
@@ -42,6 +43,7 @@ sell_volume = []
 times = []
 his_orders = []  # type: List[Orders]
 until = None  # type: datetime
+exec_recv_delay_sec = []  # type: List[float]
 
 # measurement
 time_sum_unrealized_pnl = []
@@ -258,7 +260,10 @@ def run(executions: pd.DataFrame):
 
         # シグナル探索&発注
         st_think = time.time()
-        new_orders = strategy.think(trade_num, until, executions[executions['exec_date'] < until], positions,
+        new_orders = strategy.think(trade_num,
+                                    until,
+                                    executions[executions['exec_date'] < until],
+                                    positions,
                                     user_settings)
         if new_orders:
             orders.extend(new_orders)
@@ -274,6 +279,7 @@ def run(executions: pd.DataFrame):
         buy_volume.append(round(float(new_executions[new_executions['side'] == 'BUY']['size'].sum()), 8))
         sell_volume.append(round(float(new_executions[new_executions['side'] == 'SELL']['size'].sum()) * -1, 8))
         his_orders.append(new_orders)
+        exec_recv_delay_sec.append(new_executions['delay'].mean())
 
         # 時間を進める
         since = until
@@ -311,7 +317,8 @@ if __name__ == '__main__':
                                          'price': 'float',
                                          'size': 'float',
                                          'buy_child_order_acceptance_id': 'str',
-                                         'sell_child_order_acceptance_id': 'str'})  # type: pd.DataFrame
+                                         'sell_child_order_acceptance_id': 'str',
+                                         'delay': 'float'})  # type: pd.DataFrame
 
     # バックテスト実行
     run(data)
@@ -327,10 +334,14 @@ if __name__ == '__main__':
     num_of_win = len(t_pnl_by_order[t_pnl_by_order['pnl'] > 0])
     num_of_lose = len(t_pnl_by_order[t_pnl_by_order['pnl'] < 0])
     num_of_even = len(t_pnl_by_order[t_pnl_by_order['pnl'] == 0])
+    win_rate = num_of_win / num_of_trades if num_of_trades else 0
     size_of_orders = round(float(sum([d(o.size) for o in orders])), 8) if orders else 0
     size_of_exec = float(sum([Decimal(e.size) for e in executions_me]))
     profit = round(sum([d(t.pnl) for t in trades if t.pnl > 0]))
     loss = abs(round(sum([d(t.pnl) for t in trades if t.pnl < 0])))
+    avg_profit = profit / num_of_win
+    avg_loss = profit / num_of_lose
+    expected_value = avg_profit * win_rate - avg_loss * (1 - win_rate)
 
     # テスト結果
     result = {
@@ -374,20 +385,24 @@ if __name__ == '__main__':
         'last_prices': ltp_hst,
         'buy_pos_size': buy_pos_size,
         'sell_pos_size': sell_pos_size,
-        'realized_gain': realized_pnl,
-        'unrealized_gain': unrealized_pnl,
+        'realized_gain': np.array(realized_pnl),
+        'unrealized_gain': np.array(unrealized_pnl),
         'market_buy_size': buy_volume,
         'market_sell_size': sell_volume,
         'pnl_per_trade': [t.pnl for t in trades],
+        'exec_recv_delay_sec': exec_recv_delay_sec,
 
         # Stats
         'num_of_trades': num_of_trades,
         'num_of_win': num_of_win,
         'num_of_lose': num_of_lose,
         'num_of_even': num_of_even,
-        'win_rate': num_of_win / num_of_trades if num_of_trades else 0,
+        'win_rate': win_rate,
         'profit': profit,
         'loss': loss,
+        'avg_profit': avg_profit,
+        'avg_loss': avg_loss,
+        'expected_value': expected_value,
         'total_pnl': profit - loss,
         'pf': round(profit / loss, 2) if loss else 0.0
     }

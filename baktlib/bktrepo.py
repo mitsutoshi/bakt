@@ -77,7 +77,9 @@ def print_graph(orders, result):
     dpi = 96
 
     fig, axes = plt.subplots(nrows=3, ncols=2, figsize=figsize, dpi=dpi)  # type: Figure, Tuple(Axes, Axes)
-    plt.subplots_adjust(right=2)
+    plt.suptitle(f"Back Test Report {result['datetime']} ", fontsize=28)
+    plt.margins(0, 0)
+    plt.subplots_adjust(hspace=0.2, wspace=0.15)
 
     #
     # グラフ１：相場価格、出来高、注文価格
@@ -86,9 +88,10 @@ def print_graph(orders, result):
     # 軸１、相場価格
     ax_market = axes[1][0]  # type: Axes
     ax_market.set_title('Market & Orders', fontsize=title_fsize)
-    ax_market.set_xlabel('Time', fontsize=label_fsize)
+    ax_market.set_xlabel('Trades', fontsize=label_fsize)
     ax_market.set_ylabel('Price', fontsize=label_fsize)
     ax_market.plot(range(len(result['last_prices'])), result['last_prices'], color='blue', label='Price')
+    ax_market.margins(0, 0)
 
     # 軸１、注文価格
     max_order_num = 0
@@ -110,45 +113,59 @@ def print_graph(orders, result):
                     label='Buy Volume')
     ax_market_2.bar(range(len(result['market_sell_size'])), result['market_sell_size'], color='r', alpha=0.5,
                     label='Sell Volume')
+    ax_market_2.legend(loc='upper right')
 
     #
     # グラフ２：Realized Gain/Loss
     #
 
     # 軸１、実現損益
+
+    unrealized_gain = result['realized_gain'] + result['unrealized_gain']
+
     ax_pnl = axes[1][1]  # type: Axes
-    ax_pnl.set_title('Realized Gain/Loss', fontsize=title_fsize)
-    ax_pnl.set_xlabel('Time', fontsize=label_fsize)
+    ax_pnl.set_title('Gain/Loss & Position', fontsize=title_fsize)
+    ax_pnl.set_xlabel('Trades', fontsize=label_fsize)
     ax_pnl.set_ylabel('Price', fontsize=label_fsize)
-    ax_pnl.fill_between(range(0, len(result['realized_gain'])), result['realized_gain'], color='blue', alpha=1,
+    ax_pnl.fill_between(range(0, len(result['realized_gain'])), result['realized_gain'], color='blue', alpha=0.7,
                         linestyle='solid',
                         label='Realized Gain/Loss')
+    ax_pnl.plot(range(len(unrealized_gain)), unrealized_gain, color='pink', alpha=1,
+                linestyle='dotted', label='Unrealized Gain/Loss', linewidth=3)
     ax_pnl.hlines(0, xmin=0, xmax=len(result['realized_gain']), colors='r', linestyles='dotted')
     ax_pnl.grid()
     ax_pnl.legend(loc='upper left')
+
+    ax_pnl_2 = ax_pnl.twinx()
+    ax_pnl_2.set_ylabel('Position Size', fontsize=label_fsize)
+    ax_pnl_2.bar(range(0, len(result['buy_pos_size'])), result['buy_pos_size'], color='g', alpha=0.4,
+               label='Long position size')
+    ax_pnl_2.bar(range(0, len(result['sell_pos_size'])), result['sell_pos_size'], color='r', alpha=0.4,
+               label='Short position size')
+    ax_pnl_2.legend(loc='upper right')
 
     #
     # グラフ３：ポジション、未実現損益
     #
 
     # 軸１、保有ポジション量
-    ax_pos = axes[2][0]  # type: Axes
-    ax_pos.set_title('Position', fontsize=title_fsize)
-    ax_pos.set_ylabel('Size', fontsize=label_fsize)
-    ax_pos.bar(range(0, len(result['buy_pos_size'])), result['buy_pos_size'], color='g', alpha=0.5,
-               label='Long position size')
-    ax_pos.bar(range(0, len(result['sell_pos_size'])), result['sell_pos_size'], color='r', alpha=0.5,
-               label='Short position size')
-    ax_pos.legend(loc='upper left')
+    # ax_pos = axes[2][0]  # type: Axes
+    # ax_pos.set_title('Position', fontsize=title_fsize)
+    # ax_pos.set_ylabel('Size', fontsize=label_fsize)
+    # ax_pos.bar(range(0, len(result['buy_pos_size'])), result['buy_pos_size'], color='g', alpha=0.5,
+    #            label='Long position size')
+    # ax_pos.bar(range(0, len(result['sell_pos_size'])), result['sell_pos_size'], color='r', alpha=0.5,
+    #            label='Short position size')
+    # ax_pos.legend(loc='upper left')
 
     # 軸２、未実現損益
-    ax_pos_2 = ax_pos.twinx()  # type: Axes
-    ax_pos_2.set_ylabel('Price', fontsize=label_fsize)
-    ax_pos_2.plot(range(0, len(result['unrealized_gain'])), result['unrealized_gain'], color='blue', alpha=1,
-                  linestyle='solid',
-                  label='Unrealized Gain/Loss')
-    ax_pos_2.hlines(0, xmin=0, xmax=len(result['unrealized_gain']), colors='r', linestyles='dotted')
-    ax_pos_2.legend(loc='upper right')
+    # ax_pos_2 = ax_pos.twinx()  # type: Axes
+    # ax_pos_2.set_ylabel('Price', fontsize=label_fsize)
+    # ax_pos_2.plot(range(0, len(result['unrealized_gain'])), result['unrealized_gain'], color='blue', alpha=1,
+    #               linestyle='solid',
+    #               label='Unrealized Gain/Loss')
+    # ax_pos_2.hlines(0, xmin=0, xmax=len(result['unrealized_gain']), colors='r', linestyles='dotted')
+    # ax_pos_2.legend(loc='upper right')
 
     #
     # グラフ４：実現損益のヒストグラム
@@ -162,6 +179,13 @@ def print_graph(orders, result):
     ax_hist.hist(result['pnl_per_trade'], bins=20, color='blue', alpha=1.0, label='Realized Gain/Loss')
     ax_hist.vlines(x=0, ymin=0, ymax=1, colors='r', linestyles='solid')
 
+    ax_delay = axes[2][0]  # type: Axes
+    ax_delay.set_title('Execution receive delay time', fontsize=title_fsize)
+    ax_delay.set_xlabel('Trades', fontsize=label_fsize)
+    ax_delay.set_ylabel('Delay time (sec)', fontsize=label_fsize)
+    ax_delay.plot(range(len(result['exec_recv_delay_sec'])), result['exec_recv_delay_sec'], color='g', markersize=12, label='execution receive delay time')
+
+    #
     ax_text = axes[0][0]  # type: Axes
     ax_text.axis('off')
     ax_text.spines["right"].set_color("none")
@@ -171,7 +195,7 @@ def print_graph(orders, result):
 
     fsize = 19
     label_x = 0.05
-    value_x = 0.25
+    value_x = 0.3
     y_span = 0.06
     y_subtitle = 0.70
     y = 0.60
@@ -223,11 +247,13 @@ def print_graph(orders, result):
     ax_text.text(value_x, y, f"{result['exec_rate']:.2%}", fontsize=fsize)
     y -= y_span
 
+    # 損益
     ax_text.text(0.03, y, "Profit and Loss", fontsize=fsize)
     ax_text.text(value_x, y, f"{result['total_pnl']:,} JPY (Profit: {result['profit']:,}"
-    f", Loss: {result['loss']:,}, PF: {result['pf']:,})", fontsize=fsize)
+    f", Loss: {result['loss']:,}, PF: {result['pf']:,}, Expected value: {result['expected_value']})", fontsize=fsize)
     y -= y_span
 
+    # 勝率
     ax_text.text(0.03, y, "Win %", fontsize=fsize)
     ax_text.text(value_x, y, f"{result['win_rate']:.2%} (win: {result['num_of_win']:,}, "
     f"lose: {result['num_of_lose']:,}, even: {result['num_of_even']:,} / All: {result['num_of_trades']})",
@@ -286,10 +312,7 @@ def print_graph(orders, result):
     ax_text_r.text(value_x, y, f"{result['num_of_timeframes']:,}", fontsize=fsize)
     y -= y_span
 
-    ax_text.text(0.8, 0.85, f"Back Test Report {result['datetime']} ", fontsize=32)
-
-    # plt.suptitle('bakt', fontsize=32)
-    # plt.subplots_adjust(hspace=0.9)
+    # ax_text.text(0.01, 0.85, f"Back Test Report {result['datetime']} ", fontsize=32)
 
     from datetime import datetime
     timestamp = datetime.strptime(result['datetime'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d%H%M%S')

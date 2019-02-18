@@ -89,7 +89,7 @@ class Order(object):
                                          created_at=exec_date,
                                          side=self.side,
                                          price=exec_price,
-                                         size=exec_size))
+                                         size=exec_size,))
         logger.debug(f"Order was {'full' if self.open_size == 0 else 'partial'} contracted. [{self}]")
 
     def is_active(self) -> bool:
@@ -106,15 +106,18 @@ class Order(object):
 
 class Execution(object):
 
-    def __init__(self, order_id, created_at: datetime, side: str, size: float, price: float):
-        self.order_id = order_id
-        self.created_at = created_at
-        self.side = side
-        self.size = size
-        self.price = price
+    def __init__(self, order_id: int, created_at: datetime, side: str,
+                 size: float, price: float, delay: float = 0):
+        self.order_id = order_id  # type: int
+        self.created_at = created_at  # type: datetime
+        self.side = side  # type: str
+        self.size = size  # type: float
+        self.price = price  # type: float
+        self.delay = delay  # type: float
 
     def __str__(self):
-        return f"Execution[created_at{self.created_at}, side={self.side}, size={self.size}, price={self.price}]"
+        return f"Execution[created_at{self.created_at}, side={self.side}" \
+            f", size={self.size}, price={self.price}, delay={self.delay}]"
 
 
 class Position(object):
