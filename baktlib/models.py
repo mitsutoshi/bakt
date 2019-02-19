@@ -14,7 +14,7 @@ class Order(object):
     """注文情報"""
 
     def __init__(self, id: int, created_at: datetime, side: str, _type: str, size: float,
-                 price: float = 0, delay_sec: int = 0, expire_sec: int = 0) -> None:
+                 price: float = 0, delay_sec: float = 0.0, expire_sec: int = 0) -> None:
 
         if not id:
             raise ValueError(f"id is required.")
@@ -43,10 +43,10 @@ class Order(object):
 
         self.open_size = size
 
-        self.delay_sec = delay_sec  # type: int
+        self.delay_sec = delay_sec  # type: float
         """この注文が約定可能になるまでの遅延時間（秒）"""
 
-        self.expire_sec = expire_sec if type == ORDER_TYPE_LIMIT else -1  # type: int
+        self.expire_sec = expire_sec if _type == ORDER_TYPE_LIMIT else -1  # type: int
         """この注文の有効時間（秒）
         有効時間を指定することによって、取引所APIが持つ注文の有効期限設定機能や、発注後一定時間が経過した注文をキャンセルする戦略をテストすることが可能です。
         0は無期限を表します。
@@ -54,7 +54,7 @@ class Order(object):
 
         self.status = ORDER_STATUS_ACTIVE
         self.executions = []  # type: List
-        logger.debug(f"Order was created. {self}")
+        logger.debug(f"Created {self}")
 
     def cancel(self) -> None:
         """注文をキャンセルします。"""
@@ -100,8 +100,9 @@ class Order(object):
         return self.status == ORDER_STATUS_ACTIVE
 
     def __str__(self):
-        return f"Order[id={self.id}, {self.created_at}, side={self.side}, type={self.type}," \
-            f" size={self.size}, open_size={self.open_size}, price={self.price}, status={self.status}]"
+        return f"Order[id={self.id}, created_at={self.created_at}, side={self.side}, type={self.type}," \
+            f" size={self.size}, open_size={self.open_size}, price={self.price}, status={self.status}]" \
+            f" delay_sec={self.delay_sec}, expire_sec={self.expire_sec}"
 
 
 class Execution(object):
@@ -114,9 +115,10 @@ class Execution(object):
         self.size = size  # type: float
         self.price = price  # type: float
         self.delay = delay  # type: float
+        logger.debug(f"Created {self}")
 
     def __str__(self):
-        return f"Execution[created_at{self.created_at}, side={self.side}" \
+        return f"Execution[order_id={self.order_id}, created_at={self.created_at}, side={self.side}" \
             f", size={self.size}, price={self.price}, delay={self.delay}]"
 
 
@@ -137,9 +139,11 @@ class Position(object):
         self.close_price = None
         self.close_fee = 0
         self.pnl = 0
-        logger.debug(f"Position was created. {self}")
+        logger.debug(f"Created {self}")
 
     def close(self, exec_date: datetime, exec_price: float, exec_size: float) -> float:
+
+        logger.debug(f"Start to close position. {self}")
 
         # クローズ済みの分を含むポジションの全体量
         amount = d(self.amount)  # type: Decimal
