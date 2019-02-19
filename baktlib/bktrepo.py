@@ -70,7 +70,7 @@ def print_positions(trades: List[Position]):
                                       'open_fee', 'closed_at', 'close_price', 'close_fee', 'pnl']])
 
 
-def print_graph(orders, result):
+def print_graph(orders, result, dst):
     title_fsize = 22
     label_fsize = 16
     figsize = (36, 24)
@@ -177,13 +177,17 @@ def print_graph(orders, result):
     ax_hist.set_xlabel('Price', fontsize=label_fsize)
     ax_hist.set_ylabel('Count', fontsize=label_fsize)
     ax_hist.hist(result['pnl_per_trade'], bins=20, color='blue', alpha=1.0, label='Realized Gain/Loss')
-    ax_hist.vlines(x=0, ymin=0, ymax=1, colors='r', linestyles='solid')
+    ax_hist.vlines(x=0, ymin=0, ymax=100, colors='r', linestyles='solid')
 
     ax_delay = axes[2][0]  # type: Axes
     ax_delay.set_title('Execution receive delay time', fontsize=title_fsize)
     ax_delay.set_xlabel('Trades', fontsize=label_fsize)
-    ax_delay.set_ylabel('Delay time (sec)', fontsize=label_fsize)
-    ax_delay.plot(range(len(result['exec_recv_delay_sec'])), result['exec_recv_delay_sec'], color='g', markersize=12, label='execution receive delay time')
+    ax_delay.set_ylabel('Execution delay time (sec)', fontsize=label_fsize)
+    ax_delay.plot(range(len(result['exec_recv_delay_sec'])), result['exec_recv_delay_sec'], color='g', label='Execution receive delay time')
+
+    ax_delay_2 = ax_delay.twinx()
+    ax_delay.set_ylabel('Order delay time (sec)', fontsize=label_fsize)
+    ax_delay_2.bar(range(len(result['order_delay_sec'])), result['order_delay_sec'], color='r', alpha=0.5, label='Order delay time')
 
     #
     ax_text = axes[0][0]  # type: Axes
@@ -250,7 +254,7 @@ def print_graph(orders, result):
     # 損益
     ax_text.text(0.03, y, "Profit and Loss", fontsize=fsize)
     ax_text.text(value_x, y, f"{result['total_pnl']:,} JPY (Profit: {result['profit']:,}"
-    f", Loss: {result['loss']:,}, PF: {result['pf']:,}, Expected value: {result['expected_value']})", fontsize=fsize)
+    f", Loss: {result['loss']:,}, PF: {result['pf']:,}, Expected value: {result['expected_value']:,.1f})", fontsize=fsize)
     y -= y_span
 
     # 勝率
@@ -316,7 +320,7 @@ def print_graph(orders, result):
 
     from datetime import datetime
     timestamp = datetime.strptime(result['datetime'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d%H%M%S')
-    plt.savefig(f"./bakt_report_{timestamp}.png")
+    plt.savefig(dst + f"/bakt_report_{timestamp}.png")
     plt.show()
 
 

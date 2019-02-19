@@ -11,11 +11,18 @@ class Config(object):
 
         section = 'default'
 
+        self.exchange = str(conf[section]['exchange'])  # type: str
+        """取引所"""
+
         self.timeframe_sec = int(conf[section]['timeframe_sec'])  # type: int
         """"""
 
         self.num_of_trade = int(conf[section]['num_of_trade'])  # type: int
         """トレードの施行回数（時間枠の数）"""
+
+        self.report_dst_dir = str(conf[section]['report_dst_dir'])  # type: str
+
+        self.strategy = str(conf[section]['strategy'])  # type: str
 
         self.user = conf['user']
 
