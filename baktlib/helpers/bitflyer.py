@@ -12,4 +12,5 @@ def conv_exec_to_ohlc(t: pd.DataFrame, rule: str) -> pd.DataFrame:
                                  'buy_size': 'sum',
                                  'sell_size': 'sum',
                                  'buy_child_order_acceptance_id': 'nunique',
-                                 'sell_child_order_acceptance_id': 'nunique'})
+                                 'sell_child_order_acceptance_id': 'nunique',
+                                 'delay': 'mean'})

@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 data/*.json
 data/*.csv
+logs/*.png

@@ -80,7 +80,7 @@ class Order(object):
         assert exec_size <= self.open_size, \
             f"Size is too large. [{self.id}, exec_size={exec_size}, open_size={self.open_size}]"
 
-        self.open_size = round(float(Decimal(self.open_size) - Decimal(exec_size)), 8)
+        self.open_size = round(float(d(self.open_size) - d(exec_size)), 8)
         if self.open_size == 0:
             self.status = ORDER_STATUS_COMPLETED
 
@@ -174,7 +174,7 @@ class Position(object):
         self.pnl = round(float(d(self.pnl) + current_pnl))
 
         # 約定総額 = 今回約定金額＋約定済み金額
-        self.close_price = (past + close_price * open_amount) / amount
+        self.close_price = round(float((past + close_price * open_amount) / amount))
         self.close_fee = 0  # TODO feeに対応させる
         self.closed_at = exec_date
         self.open_amount = round(float(open_amount - d(exec_size)), 8)

@@ -94,16 +94,16 @@ def print_graph(orders, result, dst):
     ax_market.margins(0, 0)
 
     # 軸１、注文価格
-    max_order_num = 0
-    for o in orders:
-        max_order_num = max(max_order_num, len(o))
-    for i in range(max_order_num):
-        buy_prices = [os[i].price if os and len(os) > i and os[i].side == 'BUY' else None for os in orders]
-        sell_prices = [os[i].price if os and len(os) > i and os[i].side == 'SELL' else None for os in orders]
-        ax_market.plot(range(len(buy_prices)), buy_prices, '.', color='g', markersize=12, label='buy order price')
-        ax_market.plot(range(len(sell_prices)), sell_prices, '.', color='r', markersize=12, label='sell order price')
-    ax_market.grid()
-    ax_market.legend(loc='upper left')
+    # max_order_num = 0
+    # for o in orders:
+    #     max_order_num = max(max_order_num, len(o))
+    # for i in range(max_order_num):
+    #     buy_prices = [os[i].price if os and len(os) > i and os[i].side == 'BUY' else None for os in orders]
+    #     sell_prices = [os[i].price if os and len(os) > i and os[i].side == 'SELL' else None for os in orders]
+    # ax_market.plot(range(len(buy_prices)), buy_prices, '.', color='g', markersize=12, label='buy order price')
+    # ax_market.plot(range(len(sell_prices)), sell_prices, '.', color='r', markersize=12, label='sell order price')
+    # ax_market.grid()
+    # ax_market.legend(loc='upper left')
 
     # 軸２、売買種類別出来高
     ax_market_2 = ax_market.twinx()  # type: Axes
@@ -173,21 +173,26 @@ def print_graph(orders, result, dst):
 
     # トレード別損益ヒストグラム
     ax_hist = axes[2][1]  # type: Axes
-    ax_hist.set_title('Realized Gain/Loss Histgram', fontsize=title_fsize)
+    ax_hist.set_title('Realized Gain/Loss Per Order', fontsize=title_fsize)
     ax_hist.set_xlabel('Price', fontsize=label_fsize)
     ax_hist.set_ylabel('Count', fontsize=label_fsize)
     ax_hist.hist(result['pnl_per_trade'], bins=20, color='blue', alpha=1.0, label='Realized Gain/Loss')
-    ax_hist.vlines(x=0, ymin=0, ymax=100, colors='r', linestyles='solid')
+    if result['pnl_per_trade']:
+        ax_hist.vlines(x=0, ymin=0, ymax=max(result['pnl_per_trade']), colors='r', linestyles='solid')
 
+    # 約定履歴受信遅延
     ax_delay = axes[2][0]  # type: Axes
-    ax_delay.set_title('Execution receive delay time', fontsize=title_fsize)
+    ax_delay.set_title('Delay time', fontsize=title_fsize)
     ax_delay.set_xlabel('Trades', fontsize=label_fsize)
     ax_delay.set_ylabel('Execution delay time (sec)', fontsize=label_fsize)
-    ax_delay.plot(range(len(result['exec_recv_delay_sec'])), result['exec_recv_delay_sec'], color='g', label='Execution receive delay time')
+    ax_delay.plot(range(len(result['exec_recv_delay_sec'])),
+                  result['exec_recv_delay_sec'], color='g', label='Execution receive delay time (sec)')
 
+    # 発注遅延
     ax_delay_2 = ax_delay.twinx()
-    ax_delay.set_ylabel('Order delay time (sec)', fontsize=label_fsize)
-    ax_delay_2.bar(range(len(result['order_delay_sec'])), result['order_delay_sec'], color='r', alpha=0.5, label='Order delay time')
+    ax_delay_2.set_ylabel('Order delay time (sec)', fontsize=label_fsize)
+    ax_delay_2.bar(range(len(result['order_delay_sec'])),
+                   result['order_delay_sec'], color='r', alpha=0.5, label='Order delay time (sec)')
 
     #
     ax_text = axes[0][0]  # type: Axes
