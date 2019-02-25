@@ -16,16 +16,8 @@ class Order(object):
     def __init__(self, id: int, created_at: datetime, side: str, _type: str, size: float,
                  price: float = 0, delay_sec: float = 0.0, expire_sec: int = 0) -> None:
 
-        if not id:
-            raise ValueError(f"id is required.")
-        if not created_at:
-            raise ValueError(f"created_at is required.")
-        if side not in [SIDE_BUY, SIDE_SELL]:
-            raise ValueError(f"Illegal value [side='{side}']")
-        if _type not in [ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET]:
-            raise ValueError(f"Illegal value [_type='{_type}']")
-        if size <= 0:
-            raise ValueError(f"The size must be a number greater than 0. [size='{size}']")
+        if not id or not created_at or side not in ["BUY", "SELL"] or _type not in ["LIMIT", "MARKET"] or size <= 0:
+            raise ValueError(f"Illegal arguments.")
 
         self.id = id
 
@@ -46,19 +38,19 @@ class Order(object):
         self.delay_sec = delay_sec  # type: float
         """この注文が約定可能になるまでの遅延時間（秒）"""
 
-        self.expire_sec = expire_sec if _type == ORDER_TYPE_LIMIT else -1  # type: int
+        self.expire_sec = expire_sec if _type == 'LIMIT' else -1  # type: int
         """この注文の有効時間（秒）
         有効時間を指定することによって、取引所APIが持つ注文の有効期限設定機能や、発注後一定時間が経過した注文をキャンセルする戦略をテストすることが可能です。
         0は無期限を表します。
         """
 
-        self.status = ORDER_STATUS_ACTIVE
+        self.status = 'ACTIVE'
         self.executions = []  # type: List
         logger.debug(f"Created {self}")
 
     def cancel(self) -> None:
         """注文をキャンセルします。"""
-        self.status = ORDER_STATUS_CANCELED
+        self.status = 'CANCELED'
         logger.debug(f"Order was canceled. [{self}]")
 
     def contract(self, exec_date: datetime, exec_price: float, exec_size: float) -> None:
@@ -89,7 +81,7 @@ class Order(object):
                                          created_at=exec_date,
                                          side=self.side,
                                          price=exec_price,
-                                         size=exec_size,))
+                                         size=exec_size, ))
         logger.debug(f"Order was {'full' if self.open_size == 0 else 'partial'} contracted. [{self}]")
 
     def is_active(self) -> bool:

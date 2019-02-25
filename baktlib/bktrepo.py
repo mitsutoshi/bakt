@@ -7,6 +7,9 @@ from matplotlib.figure import Figure
 
 from baktlib.models import Order, Execution, Position
 
+pd.options.display.width = 300
+pd.set_option('display.width', 300)
+
 
 def print_orders(orders: List[Order]):
     t = pd.DataFrame(data={'id': [o.id for o in orders],
@@ -94,16 +97,16 @@ def print_graph(orders, result, dst):
     ax_market.margins(0, 0)
 
     # 軸１、注文価格
-    # max_order_num = 0
-    # for o in orders:
-    #     max_order_num = max(max_order_num, len(o))
-    # for i in range(max_order_num):
-    #     buy_prices = [os[i].price if os and len(os) > i and os[i].side == 'BUY' else None for os in orders]
-    #     sell_prices = [os[i].price if os and len(os) > i and os[i].side == 'SELL' else None for os in orders]
-    # ax_market.plot(range(len(buy_prices)), buy_prices, '.', color='g', markersize=12, label='buy order price')
-    # ax_market.plot(range(len(sell_prices)), sell_prices, '.', color='r', markersize=12, label='sell order price')
-    # ax_market.grid()
-    # ax_market.legend(loc='upper left')
+    max_order_num = 0
+    for o in orders:
+        max_order_num = max(max_order_num, len(o))
+    for i in range(max_order_num):
+        buy_prices = [os[i].price if os and len(os) > i and os[i].side == 'BUY' else None for os in orders]
+        sell_prices = [os[i].price if os and len(os) > i and os[i].side == 'SELL' else None for os in orders]
+    ax_market.plot(range(len(buy_prices)), buy_prices, '.', color='g', markersize=12, label='buy order price')
+    ax_market.plot(range(len(sell_prices)), sell_prices, '.', color='r', markersize=12, label='sell order price')
+    ax_market.grid()
+    ax_market.legend(loc='upper left')
 
     # 軸２、売買種類別出来高
     ax_market_2 = ax_market.twinx()  # type: Axes
@@ -139,9 +142,9 @@ def print_graph(orders, result, dst):
     ax_pnl_2 = ax_pnl.twinx()
     ax_pnl_2.set_ylabel('Position Size', fontsize=label_fsize)
     ax_pnl_2.bar(range(0, len(result['buy_pos_size'])), result['buy_pos_size'], color='g', alpha=0.4,
-               label='Long position size')
+                 label='Long position size')
     ax_pnl_2.bar(range(0, len(result['sell_pos_size'])), result['sell_pos_size'], color='r', alpha=0.4,
-               label='Short position size')
+                 label='Short position size')
     ax_pnl_2.legend(loc='upper right')
 
     #
@@ -259,7 +262,8 @@ def print_graph(orders, result, dst):
     # 損益
     ax_text.text(0.03, y, "Profit and Loss", fontsize=fsize)
     ax_text.text(value_x, y, f"{result['total_pnl']:,} JPY (Profit: {result['profit']:,}"
-    f", Loss: {result['loss']:,}, PF: {result['pf']:,}, Expected value: {result['expected_value']:,.1f})", fontsize=fsize)
+    f", Loss: {result['loss']:,}, PF: {result['pf']:,}, Expected value: {result['expected_value']:,.1f})",
+                 fontsize=fsize)
     y -= y_span
 
     # 勝率

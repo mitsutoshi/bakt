@@ -21,8 +21,10 @@ from baktlib.models import Order, Position
 
 logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
 logger = getLogger(__name__)
-pd.set_option('display.width', 300)
-pd.set_option('display.max_rows', 300)
+pd.options.display.width = 300
+# pd.set_option('display.width', 300)
+# pd.set_option('display.max_rows', 300)
+
 DATETIME_F = '%Y-%m-%d %H:%M:%S'
 
 trade_num = 1  # type: int
@@ -31,8 +33,30 @@ trades = []  # type: List[Position]
 positions = []  # type: List[Position]
 position_id = 0  # type: int
 ZERO = Decimal('0')  # type: Decimal
+t_orders = pd.DataFrame(data={'id': [],
+                              'created_at': [],
+                              'side': [],
+                              'type': [],
+                              'price': [],
+                              'size': [],
+                              'open_size': [],
+                              'delay_sec': [],
+                              'expire_sec': [],
+                              'status': []})  # type: pd.DataFrame
 
-# history
+# t_trades = pd.DataFrame(data={'id': [],
+#                               'open_order_id': [],
+#                               'opened_at': [],
+#                               'side': [],
+#                               'amount': [],
+#                               'open_price': [],
+#                               'open_amount': [],
+#                               'open_fee': [],
+#                               'closed_at': [],
+#                               'close_price': [],
+#                               'close_fee': [],
+#                               'pnl': []},)  # type: pd.DataFrame
+
 buy_pos_size = []
 sell_pos_size = []
 realized_pnl = []  # type: List[float]
@@ -88,21 +112,25 @@ def get_active_orders(dt: datetime) -> List[Order]:
     :param dt: 現在日時
     :return: 有効な注文の一覧
     """
-    return [o for o in orders if o.is_active() and (dt - o.created_at).total_seconds() >= o.delay_sec]
+    return [o for o in orders if o.status == 'ACTIVE' and (dt - o.created_at).total_seconds() >= o.delay_sec]
 
 
+# def contract(execution):
 def contract(execution):
-    global position_id
-    contract_start = time.time()
+
     exec_date = execution['exec_date']
-    exec_price = float(execution['price'])
-    exec_size = float(execution['size'])
-    exec_side = execution['side']
-    logger.debug(f"Start to execution -> id={execution['id']}, date={exec_date}"
-                 f", side={exec_side}, size={exec_size}, price={exec_price}")
 
     # 有効な注文のみを抽出
     active_orders = get_active_orders(exec_date.to_pydatetime())  # type: List[Order]
+    if not active_orders:
+        return
+
+    global position_id
+    contract_start = time.time()
+    exec_price = float(execution['price'])
+    exec_size = float(execution['size'])
+    exec_side = execution['side']
+    logger.debug(f"Start to execution -> id={execution['id']}, date={exec_date}, side={exec_side}, size={exec_size}, price={exec_price}")
 
     for o in active_orders:
 
@@ -133,7 +161,6 @@ def contract(execution):
 
         # 決済対象のポジションが存在しない場合
         if not reverse_positions:
-
             position_id += 1
             positions.append(Position(position_id, exec_date, o.side, o.price, can_exec_size_by_order, 0.0, o.id))
             o.contract(exec_date, exec_price, can_exec_size_by_order)
@@ -191,6 +218,7 @@ def run(executions: pd.DataFrame):
 
     global timeto
     global trade_num
+    global t_orders
 
     logger.info(f"Start to trading. number of executions: ")
     logger.info(f"Execution histories:")
@@ -216,7 +244,6 @@ def run(executions: pd.DataFrame):
     timeto = timefrom + timedelta(seconds=conf.timeframe_sec)
 
     max_exec_date = executions.at[len(executions) - 1, 'exec_date']
-    # logger.info(f"Start to trading. time: {since}")
 
     # ストラテジークラスをロードする
     tokens = conf.strategy.split('.')
@@ -233,10 +260,10 @@ def run(executions: pd.DataFrame):
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"Start to trading. [No: {trade_num}, time: '{timefrom}' <= time < '{timeto}']")
             logger.debug("Orders:")
-            logger.debug(f"  ACTIVE        : {len([o for o in orders if o.status == ORDER_STATUS_ACTIVE])}")
-            logger.debug(f"  CANCELED      : {len([o for o in orders if o.status == ORDER_STATUS_CANCELED])}")
-            logger.debug(f"  PARTIAL       : {len([o for o in orders if o.status == ORDER_STATUS_PARTIAL])}")
-            logger.debug(f"  COMPLETED     : {len([o for o in orders if o.status == ORDER_STATUS_COMPLETED])}")
+            logger.debug(f"  ACTIVE        : {len([o for o in orders if o.status == 'ACTIVE'])}")
+            logger.debug(f"  CANCELED      : {len([o for o in orders if o.status == 'CANCELED'])}")
+            logger.debug(f"  PARTIAL       : {len([o for o in orders if o.status == 'PARTIAL'])}")
+            logger.debug(f"  COMPLETED     : {len([o for o in orders if o.status == 'COMPLETED'])}")
             logger.debug("Positions:")
             logger.debug(f"  length        : {len(positions)}")
             logger.debug(f"  size of buy   : {sum_current_pos_size('BUY')}")
@@ -248,26 +275,43 @@ def run(executions: pd.DataFrame):
 
         # 約定判定
         if new_executions.empty:
-            logger.debug("New executions is empty.")
+            logger.debug("There is no new execution.")
         else:
-            [contract(e) for idx, e in new_executions.iterrows()]
+            if not get_active_orders(timeto):
+                logger.debug("There is no active order.")
+            else:
+                for idx, e in new_executions.iterrows():
+                    contract(e)
             ltp = new_executions.tail(1)['price'].values[0]
 
         # 注文キャンセル処理
         st_cancel = time.time()
 
         # 有効期限を過ぎた注文のステータスを有効期限切れに更新します。
-        [o.cancel() for o in get_active_orders(timeto) if o.expire_sec and (timeto - o.created_at).seconds > o.expire_sec]
+        [o.cancel() for o in get_active_orders(timeto) if o.expire_sec and (timeto - o.created_at).total_seconds() > o.expire_sec]
 
         time_cancel.append(time.time() - st_cancel)
 
         # シグナル探索&発注
         st_think = time.time()
-        new_orders = stg.think(trade_num, timeto, orders, positions)
+        new_orders = stg.think(trade_num, timeto, orders, positions)  # type: List[Order]
         time_think.append(time.time() - st_think)
 
         if new_orders:
             orders.extend(new_orders)
+            # for no in new_orders:
+            #     t_orders = t_orders.append(pd.Series([no.id,
+            #                                           no.created_at,
+            #                                           no.side,
+            #                                           no.type,
+            #                                           no.price,
+            #                                           no.size,
+            #                                           no.open_size,
+            #                                           no.delay_sec,
+            #                                           no.expire_sec,
+            #                                           no.status],
+            #                                          index=t_orders.columns,
+            #                                          name=no.id))
 
         # 時間枠ごとに状況を記録する
         times.append(timeto)
@@ -418,9 +462,9 @@ if __name__ == '__main__':
 
         s = time.time()
         bktrepo.print_orders(orders)
-        bktrepo.print_executions(orders)
-        bktrepo.print_trades(trades)
-        bktrepo.print_positions(positions)
+        # bktrepo.print_executions(orders)
+        # bktrepo.print_trades(trades)
+        # bktrepo.print_positions(positions)
         bktrepo.print_graph(his_orders, result, conf.report_dst_dir)
         time_print = time.time() - s
 
