@@ -273,13 +273,14 @@ def run(executions: pd.DataFrame):
         new_executions = executions[
             (executions['exec_date'] >= timefrom) & (executions['exec_date'] < timeto)]  # type: pd.DataFrame
 
-        # 約定判定
         if new_executions.empty:
             logger.debug("There is no new execution.")
         else:
             if not get_active_orders(timeto):
                 logger.debug("There is no active order.")
             else:
+
+                # 有効な注文が存在するなら約定判定する
                 for idx, e in new_executions.iterrows():
                     contract(e)
             ltp = new_executions.tail(1)['price'].values[0]
