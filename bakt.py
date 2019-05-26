@@ -18,6 +18,7 @@ from baktlib import bktrepo, config
 from baktlib.constants import *
 from baktlib.helpers.calc import d, sub, sum_size
 from baktlib.models import Order, Position
+from baktlib.helpers import bitflyer
 
 logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
 logger = getLogger(__name__)
@@ -69,6 +70,7 @@ his_orders = []  # type: List[Orders]
 timeto = None  # type: datetime
 exec_recv_delay_sec = []  # type: List[float]
 order_delay_sec = []  # type: List[float]
+volume = 0  # type: Decimal
 
 # measurement
 time_sum_unrealized_pnl = []
@@ -115,7 +117,6 @@ def get_active_orders(dt: datetime) -> List[Order]:
     return [o for o in orders if o.status == 'ACTIVE' and (dt - o.created_at).total_seconds() >= o.delay_sec]
 
 
-# def contract(execution):
 def contract(execution):
 
     exec_date = execution['exec_date']
@@ -219,18 +220,35 @@ def run(executions: pd.DataFrame):
     global timeto
     global trade_num
     global t_orders
+    global volume
 
     logger.info(f"Start to trading. number of executions: ")
-    logger.info(f"Execution histories:")
-    logger.info(f"  length: {len(executions):,}")
-    logger.info(f"  from: {executions.head(1).iat[0, 0]}")
-    logger.info(f"  to: {executions.tail(1).iat[0, 0]}")
+    logger.info(f"Executions: length={len(executions):,}, from={executions.head(1).iat[0, 0]}, to={executions.tail(1).iat[0, 0]}")
 
+    logger.info('start to_datetime exec_date')
     executions['exec_date'] = pd.to_datetime(executions['exec_date'])
-    # executions = executions.set_index('exec_date')
+    logger.info('end to_datetime exec_date')
+
 
     # 時間枠の切れ目に合わせて開始時刻を調整する
+    print(executions.keys())
     first_exec_date = executions.at[0, 'exec_date']
+    # first_exec_date = executions.head(1)['exec_date']
+    # executions = executions.set_index('exec_date')
+
+    # print(first_exec_date[0:4])
+    # print(first_exec_date[5:7])
+    # print(first_exec_date[8:10])
+    # print(first_exec_date[11:13])
+    # print(first_exec_date[14:16])
+    # timefrom = datetime(year=int(first_exec_date[0:4]),
+    #                     month=int(first_exec_date[5:7]),
+    #                     day=int(first_exec_date[8:10]),
+    #                     hour=int(first_exec_date[11:13]),
+    #                     minute=int(first_exec_date[14:16]),
+    #                     second=int(first_exec_date[17:19]),
+    #                     tzinfo=timezone.utc)  # type: datetime
+
     timefrom = datetime(year=first_exec_date.year,
                         month=first_exec_date.month,
                         day=first_exec_date.day,
@@ -238,6 +256,7 @@ def run(executions: pd.DataFrame):
                         minute=first_exec_date.minute,
                         second=first_exec_date.second,
                         tzinfo=timezone.utc)  # type: datetime
+
     if timefrom.second % conf.timeframe_sec > 0:
         timefrom = timefrom - timedelta(seconds=timefrom.second % conf.timeframe_sec)
 
@@ -245,12 +264,26 @@ def run(executions: pd.DataFrame):
 
     max_exec_date = executions.at[len(executions) - 1, 'exec_date']
 
+    #
+    print('read csv')
+    rule = conf.user['ohlc_rule']
+    ohlc = pd.read_csv('data/ohlc_bitflyer_20190326.csv')  # type: pd.DataFrame
+    ohlc['time'] = pd.to_datetime(ohlc['time'])
+    ohlc = ohlc.set_index('time').resample(rule=rule).agg({
+                                         'open': 'first',
+                                         'high': 'max',
+                                         'low': 'min',
+                                         'close': 'last',
+                                         'size': 'sum',
+                                         'delay': 'mean'})
+
+
     # ストラテジークラスをロードする
     tokens = conf.strategy.split('.')
     package_name = tokens[0]
     class_name = tokens[1]
     cls = getattr(import_module(package_name), class_name)
-    stg = cls(conf.user, executions)
+    stg = cls(conf.user, executions, ohlc)
 
     while trade_num <= conf.num_of_trade:
 
@@ -273,16 +306,12 @@ def run(executions: pd.DataFrame):
         new_executions = executions[
             (executions['exec_date'] >= timefrom) & (executions['exec_date'] < timeto)]  # type: pd.DataFrame
 
-        if new_executions.empty:
-            logger.debug("There is no new execution.")
-        else:
-            if not get_active_orders(timeto):
-                logger.debug("There is no active order.")
-            else:
+        if not new_executions.empty:
 
-                # 有効な注文が存在するなら約定判定する
-                for idx, e in new_executions.iterrows():
-                    contract(e)
+            # 有効な注文が存在するなら約定判定する
+            if get_active_orders(timeto):
+                [contract(e) for idx, e in new_executions.iterrows()]
+
             ltp = new_executions.tail(1)['price'].values[0]
 
         # 注文キャンセル処理
@@ -300,19 +329,6 @@ def run(executions: pd.DataFrame):
 
         if new_orders:
             orders.extend(new_orders)
-            # for no in new_orders:
-            #     t_orders = t_orders.append(pd.Series([no.id,
-            #                                           no.created_at,
-            #                                           no.side,
-            #                                           no.type,
-            #                                           no.price,
-            #                                           no.size,
-            #                                           no.open_size,
-            #                                           no.delay_sec,
-            #                                           no.expire_sec,
-            #                                           no.status],
-            #                                          index=t_orders.columns,
-            #                                          name=no.id))
 
         # 時間枠ごとに状況を記録する
         times.append(timeto)
@@ -326,6 +342,7 @@ def run(executions: pd.DataFrame):
         his_orders.append(new_orders)
         exec_recv_delay_sec.append(new_executions['delay'].mean())
         order_delay_sec.append(sum([d(o.delay_sec) for o in new_orders]) / len(new_orders) if new_orders else 0.0)
+        volume += Decimal(str(new_executions['size'].sum()))
 
         # 時間を進める
         timefrom = timeto
@@ -370,6 +387,7 @@ if __name__ == '__main__':
                                              'buy_child_order_acceptance_id': 'str',
                                              'sell_child_order_acceptance_id': 'str',
                                              'delay': 'float'})  # type: pd.DataFrame
+        print(data)
 
         # バックテスト実行
         run(data)
@@ -409,6 +427,7 @@ if __name__ == '__main__':
             'data_length': len(data),
             'timeframe_sec': conf.timeframe_sec,
             'num_of_timeframes': trade_num,
+            'volume': float(volume),
 
             # Orders
             'num_of_orders': len(orders),
@@ -468,14 +487,6 @@ if __name__ == '__main__':
         # bktrepo.print_positions(positions)
         bktrepo.print_graph(his_orders, result, conf.report_dst_dir)
         time_print = time.time() - s
-
-        # FIXME 削除
-        print(f"time_sum_current_pos_size: {sum(time_sum_current_pos_size)}")
-        print(f"time_sum_unrealized_pnl: {sum(time_sum_unrealized_pnl)}")
-        print(f"time_think: {sum(time_think)}")
-        print(f"time_cancel: {sum(time_cancel)}")
-        print(f"time_print: {time_print}")
-        print(f"time_contract: {sum(time_contract)}")
         print(f"Time: {time.time() - st}")
 
     except Exception as e:
