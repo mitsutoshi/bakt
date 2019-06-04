@@ -6,13 +6,13 @@ from typing import List, Dict, Any
 import pandas as pd
 
 from baktlib.constants import *
-from baktlib.helpers import bitflyer
-from baktlib.helpers.calc import d
+from baktlib import bitflyer
+from baktlib.calc import d
 from baktlib.models import Order, Position
 from baktlib.strategy import Strategy
 
 
-class Snake(Strategy):
+class Cobra(Strategy):
     """
     価格の期間あたりのZスコアを算出して、異常値を検出したら逆張りでエントリーします。
     """
@@ -53,6 +53,10 @@ class Snake(Strategy):
         # 価格のZスコア = 偏差（価格 - 母平均） / 標準偏差
         self.price_z = deviation / stdev
 
+        # 価格のZスコアの平均
+        w = 5
+        self.price_z_mean = self.price_z.rolling(w, min_periods=w).mean()
+
     def think(self,
               trade_num: int,
               dt: datetime,
@@ -89,33 +93,71 @@ class Snake(Strategy):
         #                                 delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
 
         # Zスコアが著しく低い場合は買いポジションを減らす
-        if self.price_z[index] < -z_outside and long_size > 0.01:
-            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
-                                    _type=ORDER_TYPE_LIMIT, size=long_size, price=close,
-                                    delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
+        # if self.price_z[index] < -z_outside and long_size > 0.01:
+        #     new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
+        #                             _type=ORDER_TYPE_LIMIT, size=long_size, price=close,
+        #                             delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
+        #
+        # # Zスコアが著しく高い場合は売りポジションを減らす
+        # elif self.price_z[index] > z_outside and short_size > 0.01:
+        #     new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
+        #                             _type=ORDER_TYPE_LIMIT, size=short_size, price=close,
+        #                             delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
 
-        # Zスコアが著しく高い場合は売りポジションを減らす
-        elif self.price_z[index] > z_outside and short_size > 0.01:
-            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
-                                    _type=ORDER_TYPE_LIMIT, size=short_size, price=close,
-                                    delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
-
-        # Zスコアが-3を下抜けしたら売り
-        if self.price_z[index - 1] >= -z_outside > self.price_z[index]:
+        if long_size >= 0.01 and self.price_z_mean[index - 1] > self.price_z_mean[index]:
             new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
                                     _type=ORDER_TYPE_LIMIT,
-                                    size=self.order_size + long_size,
+                                    size=long_size,
                                     price=close,
                                     delay_sec=self.order_delay_sec,
                                     expire_sec=self.order_expire_sec))
 
-        elif self.price_z[index - 1] <= z_outside < self.price_z[index]:
+        elif short_size >= 0.01 and self.price_z_mean[index - 1] < self.price_z_mean[index]:
             new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
                                     _type=ORDER_TYPE_LIMIT,
-                                    size=self.order_size + short_size,
+                                    size=short_size,
                                     price=close,
                                     delay_sec=self.order_delay_sec,
                                     expire_sec=self.order_expire_sec))
+
+        elif index > 1\
+            and self.price_z_mean[index - 2] > self.price_z_mean[index - 1] < -2 \
+            and self.price_z_mean[index - 1] < self.price_z_mean[index]:
+            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
+                                    _type=ORDER_TYPE_LIMIT,
+                                    size=self.order_size,
+                                    price=close,
+                                    delay_sec=self.order_delay_sec,
+                                    expire_sec=self.order_expire_sec))
+
+        elif index > 1\
+            and self.price_z_mean[index - 2] < self.price_z_mean[index - 1] > 2\
+            and self.price_z_mean[index - 1] > self.price_z_mean[index]:
+            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
+                                    _type=ORDER_TYPE_LIMIT,
+                                    size=self.order_size,
+                                    price=close,
+                                    delay_sec=self.order_delay_sec,
+                                    expire_sec=self.order_expire_sec))
+
+        # elif index > 1 and self.price_z_mean[index - 1] < self.price_z_mean[index] and short_size:
+        #     new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
+        #                             _type=ORDER_TYPE_LIMIT,
+        #                             size=self.order_size,
+        #                             price=close,
+        #                             delay_sec=self.order_delay_sec,
+        #                             expire_sec=self.order_expire_sec))
+        #
+        # elif index > 1 and self.price_z_mean[index - 1] > self.price_z_mean[index] and long_size:
+        #     new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
+        #                             _type=ORDER_TYPE_LIMIT,
+        #                             size=self.order_size,
+        #                             price=close,
+        #                             delay_sec=self.order_delay_sec,
+        #                             expire_sec=self.order_expire_sec))
+
+        #
+        # elif self.price_z[index - 1] <= z_outside < self.price_z[index]:
 
         # elif self.price_z[index - 1] < -3 and self.price_z[index] >= -3 and short_size > 0:
         #     new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
@@ -133,21 +175,21 @@ class Snake(Strategy):
         #                             delay_sec=self.order_delay_sec,
         #                             expire_sec=self.order_expire_sec))
 
-        # 逆張りで買い
-        if -z_outside < self.price_z[index] < -z_inside:
-        # elif self.price_z[index] < -z_inside:
-            if long_size < float(self.user_config['pos_limit_size']):
-                new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
-                                        _type=ORDER_TYPE_LIMIT, size=self.order_size + short_size, price=close + 1,
-                                        delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
-
-        # 逆張りで売り
-        elif z_inside < self.price_z[index] < z_outside:
-        # elif z_inside < self.price_z[index]:
-            if short_size < float(self.user_config['pos_limit_size']):
-                new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
-                                        _type=ORDER_TYPE_LIMIT, size=self.order_size + long_size, price=close - 1,
-                                        delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
+        # # 逆張りで買い
+        # if -z_outside < self.price_z[index] < -z_inside:
+        # # elif self.price_z[index] < -z_inside:
+        #     if long_size < float(self.user_config['pos_limit_size']):
+        #         new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
+        #                                 _type=ORDER_TYPE_LIMIT, size=self.order_size + short_size, price=close + 1,
+        #                                 delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
+        #
+        # # 逆張りで売り
+        # elif z_inside < self.price_z[index] < z_outside:
+        # # elif z_inside < self.price_z[index]:
+        #     if short_size < float(self.user_config['pos_limit_size']):
+        #         new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
+        #                                 _type=ORDER_TYPE_LIMIT, size=self.order_size + long_size, price=close - 1,
+        #                                 delay_sec=self.order_delay_sec, expire_sec=self.order_expire_sec))
 
         # 順張り
         # elif index > 0 and self.price_z[index - 1] < -1.8 <= self.price_z[index]:

@@ -7,8 +7,7 @@ import pandas as pd
 import talib
 
 from baktlib.constants import *
-from baktlib.helpers import bitflyer
-from baktlib.helpers.calc import d
+from baktlib.calc import d
 from baktlib.models import Order, Position
 from baktlib.strategy import Strategy
 
@@ -32,20 +31,23 @@ class TripleMACD(Strategy):
         # self.ema = talib.EMA(closes, timeperiod=50)
         # self.fastMACD = talib.MACD(closes, fastperiod=6, slowperiod=19, signalperiod=9)
         # self.middleMACD = talib.MACD(closes, fastperiod=12, slowperiod=26, signalperiod=9)
-        print(ohlc.head(10))
+
         self.ohlc = ohlc
 
-        self.ema = talib.EMA(ohlc['close'], timeperiod=50)
+        # self.ema = talib.EMA(ohlc['close'], timeperiod=50)
         self.fastMACD = talib.MACD(ohlc['close'], fastperiod=6, slowperiod=19, signalperiod=9)
         self.middleMACD = talib.MACD(ohlc['close'], fastperiod=12, slowperiod=26, signalperiod=9)
+        pd.options.display.max_rows = 1000
+        # print(self.fastMACD[0].head(1000))
 
     def think(self,
               trade_num: int,
               dt: datetime,
               orders: List[Order],
               positions: List[Position],
-              bids=None,
-              asks=None) -> List[Order]:
+              mid_price=None,
+              best_ask_price=None,
+              best_bid_price=None) -> List[Order]:
 
         new_orders = []  # type: List[Order]
 
@@ -70,19 +72,23 @@ class TripleMACD(Strategy):
         if not (fmacd[trade_num - 1] and fmacd[trade_num] and fsignal[trade_num] and fsignal[trade_num - 1]):
             return new_orders
 
+        # print(f"fastmacd {fmacd[trade_num]}, signal: {fsignal[trade_num]}")
         is_gc_fast = fmacd[trade_num] > fsignal[trade_num] and fmacd[trade_num - 1] <= fsignal[trade_num - 1]
         is_dc_fast = fmacd[trade_num] < fsignal[trade_num] and fmacd[trade_num - 1] >= fsignal[trade_num - 1]
         is_gc_middle = mmacd[trade_num] > msignal[trade_num] and mmacd[trade_num - 1] <= msignal[trade_num - 1]
         is_dc_middle = mmacd[trade_num] < msignal[trade_num] and mmacd[trade_num - 1] >= msignal[trade_num - 1]
 
+
+        # print(f"mid: {mid_price}")
+
         if (is_gc_fast or is_gc_middle) and buy_pos_size < self.pos_limit_size:
             new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
-                                    _type=ORDER_TYPE_LIMIT, size=size + sell_pos_size, price=ltp - 30,
+                                    _type=ORDER_TYPE_LIMIT, size=size + sell_pos_size, price=mid_price if mid_price else ltp,
                                     delay_sec=self.order_delay_sec + recv_delay, expire_sec=self.order_expire_sec))
 
         elif (is_dc_fast or is_dc_middle) and sell_pos_size < self.pos_limit_size:
             new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
-                                    _type=ORDER_TYPE_LIMIT, size=size + buy_pos_size, price=ltp + 30,
+                                    _type=ORDER_TYPE_LIMIT, size=size + buy_pos_size, price=mid_price if mid_price else ltp,
                                     delay_sec=self.order_delay_sec + recv_delay, expire_sec=self.order_expire_sec))
 
         return new_orders

@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def conv_exec_to_ohlc(t: pd.DataFrame, rule: str) -> pd.DataFrame:
-    t = t.set_index(pd.to_datetime(t['exec_date']))
+    # t = t.set_index(pd.to_datetime(t['exec_date']))
     t['buy_size'] = t['size'].where(t['side'] == 'BUY', 0)
     t['sell_size'] = t['size'].where(t['side'] == 'SELL', 0)
     return t.resample(rule).agg({'price': 'ohlc',
@@ -13,7 +13,7 @@ def conv_exec_to_ohlc(t: pd.DataFrame, rule: str) -> pd.DataFrame:
                                  'sell_size': 'sum',
                                  'buy_child_order_acceptance_id': 'nunique',
                                  'sell_child_order_acceptance_id': 'nunique',
-                                 'delay': 'mean'})
+                                 'delay': 'mean'}).fillna(method='ffill')
 
 
 def create_ohlc_file_from_executions(input_file_path: str, output_file_path: str, rule: str = '1s'):
@@ -34,7 +34,8 @@ def create_ohlc_file_from_executions(input_file_path: str, output_file_path: str
         'close': ohlc['price']['close'],
         'size': (ohlc['buy_size']['buy_size'] + ohlc['sell_size']['sell_size']).round(8),
         'delay': ohlc['delay']['delay'].round(3)})
-    t.dropna().to_csv(output_file_path, index=False, header=True)
+    t = t.set_index(pd.to_datetime(t['exec_date']))
+    t.fillna(method='ffill').to_csv(output_file_path, index=False, header=True)
     # print(t.head(100))
 
 

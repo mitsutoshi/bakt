@@ -124,12 +124,12 @@ def print_graph(orders, result, dst):
 
     # 軸１、実現損益
     real_g = result['realized_gain']
-    unreal_g = result['realized_gain'] + result['unrealized_gain']
+    unreal_g = result['unrealized_gain']
     ax_pnl = axes[2]  # type: Axes
     ax_pnl.tick_params(labelbottom='off', bottom='off')
     ax_pnl.set_ylabel('Price', fontsize=label_fsize)
     ax_pnl.fill_between(range(0, len(real_g)), real_g, color='blue', alpha=0.7, linestyle='solid', label='Realized Gain/Loss')
-    ax_pnl.plot(range(len(unreal_g)), unreal_g, color='pink', alpha=1, linestyle='dotted', label='Unrealized Gain/Loss', linewidth=3)
+    ax_pnl.plot(range(len(unreal_g)), real_g + unreal_g, color='pink', alpha=1, linestyle='dotted', label='Unrealized Gain/Loss', linewidth=3)
     ax_pnl.hlines(0, xmin=0, xmax=len(real_g), colors='r', linestyles='dotted')
     # ax_pnl.grid()
     ax_pnl.legend(loc='upper left')
@@ -203,9 +203,9 @@ def print_graph(orders, result, dst):
     # 注文回数
     ax_text.text(label_x, y, "Num of orders", fontsize=fsize)
     ax_text.text(value_x, y,
-                 f"{result['num_of_orders']:,} (Limit: {result['num_of_limit_orders']:,}"
-                 f", Market: {result['num_of_market_orders']:,}"
-                 f" / Buy: {result['num_of_buy_orders']:,}, Sell: {result['num_of_sell_orders']:,})", fontsize=fsize)
+                 f"{result['num_of_orders']:,} (Limit: {result['num_of_lmt_orders']:,}"
+                 f", Market: {result['num_of_mkt_orders']:,}"
+                 f" / Buy: {result['num_of_buy_orders']:,}, Sell: {result['num_of_sel_orders']:,})", fontsize=fsize)
     y -= y_span
 
     # 注文サイズ

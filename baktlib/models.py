@@ -1,11 +1,10 @@
 # coding: utf-8
 
 from datetime import datetime
-from decimal import Decimal
 from logging import getLogger
 
 from baktlib.constants import *
-from baktlib.helpers.calc import d
+from baktlib.calc import d
 
 logger = getLogger(__name__)
 
@@ -19,21 +18,25 @@ class Order(object):
         if not id or not created_at or side not in ["BUY", "SELL"] or _type not in ["LIMIT", "MARKET"] or size <= 0:
             raise ValueError(f"Illegal arguments.")
 
-        self.id = id
+        self.id = id  # type: int
 
         self.created_at = created_at
         """注文作成日時"""
 
-        self.side = side
+        self.side = side  # type: str
         """"注文種別（BUY or SELL）"""
 
-        self.type = _type
+        self.type = _type  # type: str
+        """注文タイプ"""
 
-        self.price = price
+        self.price = price  # type: float
+        """価格"""
 
-        self.size = size
+        self.size = size  # type: float
+        """発注サイズ"""
 
-        self.open_size = size
+        self.open_size = size  # type: float
+        """未約定サイズ"""
 
         self.delay_sec = delay_sec  # type: float
         """この注文が約定可能になるまでの遅延時間（秒）"""
@@ -44,8 +47,12 @@ class Order(object):
         0は無期限を表します。
         """
 
-        self.status = 'ACTIVE'
-        self.executions = []  # type: List
+        self.status = 'ACTIVE'  # type: str
+        """ステータス"""
+
+        self.executions = []  # type: List[Execution]
+        """この注文によって発生した約定"""
+
         logger.debug(f"Created {self}")
 
     def cancel(self) -> None:
