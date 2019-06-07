@@ -26,7 +26,8 @@ class Strategy(object):
               trade_num: int,
               dt: datetime,
               orders: List[Order],
-              positions: List[Position],
+              long_pos_size: float,
+              short_pos_size: float,
               bids=None,
               asks=None) -> List[Order]:
         raise NotImplementedError

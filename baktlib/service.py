@@ -20,6 +20,7 @@ class OrderManager(object):
 
     def __init__(self):
         self.__orders = []  # type: List[Order]
+        self.__orders_each_trade = []  # type: List[List[Order]]
 
     def get(self, side: Side = None, _type: OrderType = None, status: OrderStatus = None) -> List[Order]:
         ret = self.__orders
@@ -27,7 +28,7 @@ class OrderManager(object):
         if side:
             if side not in [Side.BUY, Side.SELL]:
                 raise ValueError()
-            ret = [o for o in ret if o.side == side.value]
+            ret = [o for o in ret if o.side == side]
 
         if _type:
             if _type not in [OrderType.LIMIT, OrderType.MARKET]:
@@ -45,20 +46,24 @@ class OrderManager(object):
 
         return ret
 
+    def get_orders_each_trade(self) -> List[List[Order]]:
+        return self.__orders_each_trade
+
     def len(self, side: str = None, _type: str = None, status: OrderStatus = None) -> int:
         return len(self.get(side, _type, status))
 
     def size(self, side: Side = None, _type: OrderType = None, status: OrderStatus = None) -> int:
         return __class__.sum_size(self.get(side, _type, status))
 
-    def add_order(self, order: Order) -> None:
-        if not order or not isinstance(order, Order):
-            raise ValueError('Order must not be null.')
-        self.__orders.append(order)
+    # def add_order(self, order: Order) -> None:
+    #     if not order or not isinstance(order, Order):
+    #         raise ValueError('Order must not be null.')
+    #     self.__orders.append(order)
 
     def add_orders(self, orders: List[Order]) -> None:
         if orders:
             self.__orders.extend(orders)
+            self.__orders_each_trade.append(orders)
 
     def get_active_orders(self, now: datetime) -> List[Order]:
         """有効な注文の一覧を返します。
@@ -71,25 +76,6 @@ class OrderManager(object):
             raise ValueError
         return [o for o in self.get(status=OrderStatus.ACTIVE) if (now - o.created_at).total_seconds() >= o.delay_sec]
         # return [o for o in self.__orders if o.status == 'ACTIVE' and (now - o.created_at).total_seconds() >= o.delay_sec]
-
-    # def get_orders_by_side(self, side: str) -> List[Order]:
-    #     if not side or side not in [SIDE_BUY, SIDE_SELL]:
-    #         raise ValueError()
-    #     return [o for o in self.__orders if o.side == side]
-
-    # def get_orders_by_type(self, _type: str) -> List[Order]:
-    #     if not _type or _type not in [ORDER_TYPE_LIMIT, ORDER_TYPE_MARKET]:
-    #         raise ValueError()
-    #     return [o for o in self.__orders if o.type == _type]
-
-    # def get_orders_by_status(self, status: OrderStatus) -> List[Order]:
-    #     defined_status = [OrderStatus.ACTIVE,
-    #                       OrderStatus.CANCELED,
-    #                       OrderStatus.COMPLETED,
-    #                       OrderStatus.PARTIAL]
-    #     if not status or status not in defined_status:
-    #         raise ValueError()
-    #     return [o for o in self.__orders if o.status == status.value]
 
     def get_total_size(self) -> float:
         return float(sum([Decimal(o.size) for o in self.__orders]))
@@ -151,7 +137,7 @@ class PositionManager(object):
         if not exec_date or not o.side or not o.price or not amount or not o.id:
             raise ValueError
         self.__id = self.__id + 1
-        p = Position(self.__id, exec_date, o.side, o.price, amount, fee_rate, o.id)
+        p = Position(self.__id, exec_date, o.side.value, o.price, amount, fee_rate, o.id)
         self.__positions.append(p)
 
     def delete_positions(self, i: int) -> None:
@@ -160,7 +146,7 @@ class PositionManager(object):
     def len(self) -> int:
         return len(self.__positions)
 
-    def sum_size(self, side: str) -> float:
+    def sum_size(self, side: Side) -> float:
         oa = [Decimal(str(p.open_amount)) for p in self.filter(side=side)]
         return round(float(sum(oa)), 8) if oa else 0.0
 

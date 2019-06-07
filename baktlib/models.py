@@ -12,18 +12,19 @@ logger = getLogger(__name__)
 class Order(object):
     """注文情報"""
 
-    def __init__(self, id: int, created_at: datetime, side: str, _type: str, size: float,
+    def __init__(self, id: int, created_at: datetime, side: Side, _type: str, size: float,
                  price: float = 0, delay_sec: float = 0.0, expire_sec: int = 0) -> None:
 
-        if not id or not created_at or side not in ["BUY", "SELL"] or _type not in ["LIMIT", "MARKET"] or size <= 0:
-            raise ValueError(f"Illegal arguments.")
+        if not (id and created_at and side in [Side.BUY, Side.SELL] and _type in ["LIMIT", "MARKET"] and size > 0):
+            raise ValueError(
+                f"Illegal arguments. id={id}, created_at={created_at}, side={side}, _type={_type}, size={size}")
 
         self.id = id  # type: int
 
         self.created_at = created_at
         """注文作成日時"""
 
-        self.side = side  # type: str
+        self.side = side  # type: Side
         """"注文種別（BUY or SELL）"""
 
         self.type = _type  # type: str
@@ -70,9 +71,9 @@ class Order(object):
         # 約定価格と注文価格に不整合が発生していないかチェック
         if self.type == ORDER_TYPE_LIMIT:
             m = f"Contract price is inappropriate. [side={self.side}, order_price={self.price}, exec_price={exec_price}]"
-            if self.side == SIDE_BUY:
+            if self.side == Side.BUY:
                 assert exec_price <= self.price, m
-            elif self.side == SIDE_SELL:
+            elif self.side == Side.SELL:
                 assert exec_price >= self.price, m
 
         # 約定サイズが注文サイズを超えていないかチェック
@@ -86,7 +87,7 @@ class Order(object):
         # 約定履歴を作成
         self.executions.append(Execution(order_id=self.id,
                                          created_at=exec_date,
-                                         side=self.side,
+                                         side=self.side.value,
                                          price=exec_price,
                                          size=exec_size, ))
         logger.debug(f"Order was {'full' if self.open_size == 0 else 'partial'} contracted. [{self}]")

@@ -6,8 +6,8 @@ from typing import List, Dict, Any
 import pandas as pd
 import talib
 
-from baktlib.constants import *
 from baktlib.calc import d
+from baktlib.constants import *
 from baktlib.models import Order, Position
 from baktlib.strategy import Strategy
 
@@ -34,7 +34,7 @@ class TripleMACD(Strategy):
 
         self.ohlc = ohlc
 
-        # self.ema = talib.EMA(ohlc['close'], timeperiod=50)
+        self.ema = talib.EMA(ohlc['close'], timeperiod=50)
         self.fastMACD = talib.MACD(ohlc['close'], fastperiod=6, slowperiod=19, signalperiod=9)
         self.middleMACD = talib.MACD(ohlc['close'], fastperiod=12, slowperiod=26, signalperiod=9)
         pd.options.display.max_rows = 1000
@@ -78,17 +78,28 @@ class TripleMACD(Strategy):
         is_gc_middle = mmacd[trade_num] > msignal[trade_num] and mmacd[trade_num - 1] <= msignal[trade_num - 1]
         is_dc_middle = mmacd[trade_num] < msignal[trade_num] and mmacd[trade_num - 1] >= msignal[trade_num - 1]
 
-
         # print(f"mid: {mid_price}")
 
-        if (is_gc_fast or is_gc_middle) and buy_pos_size < self.pos_limit_size:
-            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_BUY,
-                                    _type=ORDER_TYPE_LIMIT, size=size + sell_pos_size, price=mid_price if mid_price else ltp,
+        if self.ema[trade_num] > 0 and (is_gc_fast or is_gc_middle) and buy_pos_size < self.pos_limit_size:
+            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=Side.BUY,
+                                    # _type=ORDER_TYPE_LIMIT, size=size + sell_pos_size, price=mid_price if mid_price else ltp,
+                                    _type=ORDER_TYPE_LIMIT, size=size + sell_pos_size, price=ltp,
                                     delay_sec=self.order_delay_sec + recv_delay, expire_sec=self.order_expire_sec))
 
-        elif (is_dc_fast or is_dc_middle) and sell_pos_size < self.pos_limit_size:
-            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=SIDE_SELL,
-                                    _type=ORDER_TYPE_LIMIT, size=size + buy_pos_size, price=mid_price if mid_price else ltp,
+        elif self.ema[trade_num] < 0 and (is_dc_fast or is_dc_middle) and sell_pos_size < self.pos_limit_size:
+            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=Side.SELL,
+                                    # _type=ORDER_TYPE_LIMIT, size=size + buy_pos_size, price=mid_price if mid_price else ltp,
+                                    _type=ORDER_TYPE_LIMIT, size=size + buy_pos_size, price=ltp,
+                                    delay_sec=self.order_delay_sec + recv_delay, expire_sec=self.order_expire_sec))
+
+        elif buy_pos_size > 0 and (is_dc_fast or is_dc_middle):
+            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=Side.SELL,
+                                    _type=ORDER_TYPE_LIMIT, size=buy_pos_size, price=ltp,
+                                    delay_sec=self.order_delay_sec + recv_delay, expire_sec=self.order_expire_sec))
+
+        elif sell_pos_size > 0 and (is_gc_fast or is_gc_middle):
+            new_orders.append(Order(id=self.next_order_id, created_at=dt, side=Side.BUY,
+                                    _type=ORDER_TYPE_LIMIT, size=sell_pos_size, price=ltp,
                                     delay_sec=self.order_delay_sec + recv_delay, expire_sec=self.order_expire_sec))
 
         return new_orders

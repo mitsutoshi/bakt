@@ -13,34 +13,30 @@ import pandas as pd
 import time
 
 from baktlib import bktrepo, config, bitflyer
-from baktlib.constants import *
 from baktlib.calc import d, sub
+from baktlib.constants import *
 from baktlib.models import Order, OrderStatus, Side, OrderType
 from baktlib.service import OrderManager, PositionManager, HistoryManager, TradeManager
 
-pd.options.display.width = 300
-logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
-logger = getLogger(__name__)
 
-order_mgr = OrderManager()  # type: OrderManager
-pos_mgr = PositionManager()  # type: PositionManager
-his_mgr = HistoryManager()  # type: HistoryManager
-trd_mgr = TradeManager()  # type: TradeManager
-his_orders = []  # type: List[Orders]
+def strg_cls(conf: config.Config):
+    tokens = conf.strategy.split('.')
+    pkg_name = tokens[0]
+    cls_name = tokens[1]
+    return getattr(import_module('baktlib.strategies.' + pkg_name), cls_name)
 
 
 def can_buy(o: Order, exe_side: str, exe_price: float) -> bool:
-    can = o.side == Side.BUY.value and exe_side == Side.SELL.value
+    can = o.side == Side.BUY and exe_side == Side.SELL.value
     return can and exe_price <= o.price if o.type == OrderType.LIMIT.value else can
 
 
 def can_sell(o: Order, exe_side: str, exe_price: float) -> bool:
-    can = o.side == Side.SELL.value and exe_side == Side.BUY.value
+    can = o.side == Side.SELL and exe_side == Side.BUY.value
     return can and exe_price >= o.price if o.type == OrderType.LIMIT.value else can
 
 
 def contract(ex_date: pd.Timestamp, ex: pd.Series) -> None:
-
     # 有効な注文のみを抽出
     t = datetime(year=ex_date.year, month=ex_date.month, day=ex_date.day,
                  hour=ex_date.hour, minute=ex_date.minute, second=ex_date.second, tzinfo=timezone.utc)
@@ -147,36 +143,21 @@ def run():
     ohlc = bitflyer.conv_exec_to_ohlc(exec, rule=conf.user['ohlc_rule'])  # type: pd.DataFrame
     ohlc['close'] = ohlc['price']['close']
 
-    def init_strategy(conf: config.Config, exec: pd.DataFrame, ohlc: pd.DataFrame):
-        tokens = conf.strategy.split('.')
-        pkg_name = tokens[0]
-        cls_name = tokens[1]
-        cls = getattr(import_module('baktlib.strategies.' + pkg_name), cls_name)
-        return cls(conf.user, exec, ohlc)
-
     # ストラテジークラスをロードする
-    tokens = conf.strategy.split('.')
-    pkg_name = tokens[0]
-    cls_name = tokens[1]
-    cls = getattr(import_module('baktlib.strategies.' + pkg_name), cls_name)
-    stg = cls(conf.user, exec, ohlc)
+    stg = strg_cls(conf)(conf.user, exec, ohlc)
 
     trade_num = 1  # type: int
     while trade_num <= conf.num_of_trade:
-
         if trade_num % 100 == 0:
             logger.info(f"Start to trading. No: {trade_num}, from {_from}, to: {to}")
-
         if logger.isEnabledFor(logging.DEBUG):
-            ac = len(order_mgr.get(status=OrderStatus.ACTIVE))
-            cn = len(order_mgr.get(status=OrderStatus.CANCELED))
-            pr = len(order_mgr.get(status=OrderStatus.PARTIAL))
-            cm = len(order_mgr.get(status=OrderStatus.COMPLETED))
-            pb = pos_mgr.sum_size(side=Side.BUY)
-            ps = pos_mgr.sum_size(side=Side.SELL)
-            logger.debug(f"[Trading] No={trade_num}, from='{_from}', to='{to}' "
-                         f"[Orders] ACTIVE={ac}, CANCELED={cn}, PARTIAL={pr}, COMPLETED={cm} "
-                         f"[Positions] len={pos_mgr.len()}, buy_size={pb}, sell_size={ps} ")
+            a = len(order_mgr.get(status=OrderStatus.ACTIVE))
+            c = len(order_mgr.get(status=OrderStatus.CANCELED))
+            p = len(order_mgr.get(status=OrderStatus.PARTIAL))
+            m = len(order_mgr.get(status=OrderStatus.COMPLETED))
+            logger.debug(f"[Trading] No={trade_num},from='{_from}',to='{to}' "
+                         f"[Order] ACTIVE={a},CANCELED={c},PARTIAL={p},COMPLETED={m}, [Position] len={pos_mgr.len()},"
+                         f"buy_size={pos_mgr.sum_size(side=Side.BUY)},sell_size={pos_mgr.sum_size(side=Side.SELL)} ")
 
         # 現在時刻までの約定履歴を取得する
         new_exec = exec[(exec.index >= _from) & (exec.index < to)]  # type: pd.DataFrame
@@ -192,19 +173,22 @@ def run():
         # 有効期限を過ぎた注文をキャンセルする
         order_mgr.cancel(to)
 
-        # シグナル探索&発注
+        # 取引時間帯の板を抽出
         next_time = to + timedelta(seconds=1)
-        f = '%H:%M:%S'
-        # b = boards[(boards.index >= timeto.strftime(f)) & (boards.index < to.strftime(f))]
-        b = boards[(boards['time'].str[11:19] >= to.strftime(f)) & (boards['time'].str[11:19] < next_time.strftime(f))]
-        new_ords = stg.think(trade_num, to, order_mgr.get(status=OrderStatus.ACTIVE), pos_mgr.get(),
-                             mid_price=b['mid_price'][0] if len(b) else None,
-                             best_ask_price=b['best_ask_price'][0] if len(b) else None,
-                             best_bid_price=b['best_bid_price'][0] if len(b) else None)  # type: List[Order]
+        s_time = boards['time'].str[:19]
+        b = boards[(s_time >= to.strftime(DATETIME_F)) & (s_time < next_time.strftime(DATETIME_F))]
+
+        # ストラテジーを実行してシグナル探索&発注
+        new_ords = stg.think(trade_num, to, order_mgr.get(status=OrderStatus.ACTIVE),
+                             long_pos_size=pos_mgr.sum_size(side=Side.BUY),
+                             short_pos_size=pos_mgr.sum_size(side=Side.SELL),
+                             mid_price=b.iloc[0]['mid_price'] if not b.empty else None,
+                             best_ask_price=b.iloc[0]['best_ask_price'] if not b.empty else None,
+                             best_bid_price=b.iloc[0]['best_bid_price'] if not b.empty else None)  # type: List[Order]
         order_mgr.add_orders(new_ords)
 
         # 時間枠ごとに状況を記録する
-        his_orders.append(new_ords)
+        orders_each_trade.append(new_ords)
         his_mgr.add_history(time=to,
                             buy_pos_size=pos_mgr.sum_size(side=Side.BUY),
                             sell_pos_size=pos_mgr.sum_size(side=Side.SELL),
@@ -248,6 +232,15 @@ def raise_err_if_not_exists(path: str):
 if __name__ == '__main__':
     try:
         st = time.time()
+        pd.options.display.width = 300
+        logging.config.fileConfig('./logging.conf', disable_existing_loggers=False)
+        logger = getLogger(__name__)
+
+        order_mgr = OrderManager()  # type: OrderManager
+        pos_mgr = PositionManager()  # type: PositionManager
+        his_mgr = HistoryManager()  # type: HistoryManager
+        trd_mgr = TradeManager()  # type: TradeManager
+        orders_each_trade = []  # type: List[Orders]
 
         parser = ArgumentParser()
         parser.add_argument('-c', '--conf', required=False, action='store', dest='conf', help='')
@@ -271,7 +264,7 @@ if __name__ == '__main__':
         # bktrepo.print_orders(order_mgr.get())
         # bktrepo.print_executions(orders)
         # bktrepo.print_positions(positions)
-        bktrepo.print_graph(his_orders, result, conf.report_dst_dir)
+        bktrepo.print_graph(orders_each_trade, result, conf.report_dst_dir)
         print(f"Time: {time.time() - st}")
 
     except Exception as e:

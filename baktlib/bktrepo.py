@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict, Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -6,6 +6,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from baktlib.models import Order, Execution, Position
+from baktlib.constants import Side
 
 pd.options.display.width = 300
 pd.set_option('display.width', 300)
@@ -73,15 +74,22 @@ def print_positions(trades: List[Position]):
                                       'open_fee', 'closed_at', 'close_price', 'close_fee', 'pnl']])
 
 
-def print_graph(orders, result, dst):
+def print_graph(orders_each_trade: List[List[Order]], result: Dict[str, Any], dst: str) -> None:
+    """
+
+    :param orders_each_trade: トレード期間ごとの注文リストのリスト。各期間の注文リストは、0または1以上の注文を要素とする
+    :param result: バックテスト結果
+    :param dst: グラフ画像の出力先ディレクトリパス
+    :return:
+    """
 
     num_trade = result['num_of_timeframes']
-    title_fsize = 22
     label_fsize = 16
     figsize = (42, 32)
     dpi = 48
 
-    fig, axes = plt.subplots(nrows=5, ncols=1, figsize=figsize, dpi=dpi, sharex=True, sharey=False)  # type: Figure, Tuple(Axes, Axes)
+    fig, axes = plt.subplots(
+        nrows=5, ncols=1, figsize=figsize, dpi=dpi, sharex=True, sharey=False)  # type: Figure, Tuple(Axes, Axes)
     plt.suptitle(f"Back Test Report {result['datetime']} ", fontsize=18)
     plt.subplots_adjust(hspace=0, wspace=0)
     plt.margins(0, 0)
@@ -97,15 +105,20 @@ def print_graph(orders, result, dst):
     ax_mkt.plot(range(len(result['last_prices'])), result['last_prices'], color='blue', label='Price')
 
     # 軸１、注文価格
+
+    # １トレード期間あたりの最大の注文の多重度を取得する
     max_order_num = 0
-    for o in orders:
+    for o in orders_each_trade:
         max_order_num = max(max_order_num, len(o))
+
+    # トレード期間ごとの注文価格をプロットする。１期間あたりの注文数は複数の場合があるため、注文の最大多重度分ループを行う。
+    # ループの中で既にプロット済みの注文価格を再処理しないように「len(os) > i」という条件式を用いている
     for i in range(max_order_num):
-        buy_prices = [os[i].price if os and len(os) > i and os[i].side == 'BUY' else None for os in orders]
-        sell_prices = [os[i].price if os and len(os) > i and os[i].side == 'SELL' else None for os in orders]
-    ax_mkt.plot(range(len(buy_prices)), buy_prices, '.', color='g', markersize=12, label='buy order price')
-    ax_mkt.plot(range(len(sell_prices)), sell_prices, '.', color='r', markersize=12, label='sell order price')
-    # ax_mkt.grid()
+        buy_prices = [o[i].price if len(o) > i and o[i].side == Side.BUY else None for o in orders_each_trade]
+        sell_prices = [o[i].price if len(o) > i and o[i].side == Side.SELL else None for o in orders_each_trade]
+        ax_mkt.plot(range(len(buy_prices)), buy_prices, '.', color='g', markersize=12, label='buy order price')
+        ax_mkt.plot(range(len(sell_prices)), sell_prices, '.', color='r', markersize=12, label='sell order price')
+
     ax_mkt.legend(loc='upper left')
 
     # 軸２、売買種類別出来高
