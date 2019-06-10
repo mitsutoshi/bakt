@@ -177,11 +177,14 @@ def run():
         next_time = to + timedelta(seconds=1)
         s_time = boards['time'].str[:19]
         b = boards[(s_time >= to.strftime(DATETIME_F)) & (s_time < next_time.strftime(DATETIME_F))]
+        # print(f"{b.empty}, {to.strftime(DATETIME_F)} {next_time.strftime(DATETIME_F)}")
 
         # ストラテジーを実行してシグナル探索&発注
         new_ords = stg.think(trade_num, to, order_mgr.get(status=OrderStatus.ACTIVE),
+                             positions=pos_mgr.get(),
                              long_pos_size=pos_mgr.sum_size(side=Side.BUY),
                              short_pos_size=pos_mgr.sum_size(side=Side.SELL),
+                             ltp=ltp,
                              mid_price=b.iloc[0]['mid_price'] if not b.empty else None,
                              best_ask_price=b.iloc[0]['best_ask_price'] if not b.empty else None,
                              best_bid_price=b.iloc[0]['best_bid_price'] if not b.empty else None)  # type: List[Order]
@@ -243,9 +246,9 @@ if __name__ == '__main__':
         orders_each_trade = []  # type: List[Orders]
 
         parser = ArgumentParser()
-        parser.add_argument('-c', '--conf', required=False, action='store', dest='conf', help='')
-        parser.add_argument('-f', '--file', required=False, action='store', dest='file', help='')
-        parser.add_argument('-b', '--boards', required=False, action='store', dest='boards', help='')
+        parser.add_argument('-c', '--conf', required=True, action='store', dest='conf', help='')
+        parser.add_argument('-f', '--file', required=True, action='store', dest='file', help='')
+        parser.add_argument('-b', '--boards', required=True, action='store', dest='boards', help='')
         args = parser.parse_args()
 
         raise_err_if_not_exists(args.conf)
