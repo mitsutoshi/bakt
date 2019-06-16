@@ -24,11 +24,11 @@ class Snake(Strategy):
         self.ohlc = ohlc
         """OHLC"""
 
-        w = int(self.user_config['window'])
+        self.w = int(self.user_config['window'])
         close = self.ohlc['price']['close']
-        self.ohlc['mean'] = close.rolling(w, min_periods=1).mean()
+        self.ohlc['mean'] = close.rolling(self.w, min_periods=1).mean()
         deviation = close - self.ohlc['mean']
-        self.stdev = close.rolling(w, min_periods=1).std()
+        self.stdev = close.rolling(self.w, min_periods=1).std()
         self.price_z = deviation / self.stdev
 
     def think(self,
@@ -53,7 +53,7 @@ class Snake(Strategy):
         #
 
         z_prv = self.price_z[index - 1]
-        z_cur = self.price_z[index]
+        z_cur = self.price_z[index] * (self.w / (self.w - 1))
         m = self.ohlc['mean'][index]
         pos_lim_size = float(self.user_config['pos_limit_size'])
 
@@ -61,14 +61,15 @@ class Snake(Strategy):
         # ポジションを保有している場合は利確のための注文を行う
         #
 
+        k = 1.5
         if long_pos_size > 0:
 
             if z_cur < -3.5:
-                disposal_range = abs(self.stdev[index] * 2.5)  # type: float
+                disposal_range = abs(self.stdev[index] * k)  # type: float
             elif z_cur < -3:
-                disposal_range = abs(self.stdev[index] * 2)  # type: float
+                disposal_range = abs(self.stdev[index] * k)  # type: float
             elif z_cur < -2.5:
-                disposal_range = abs(self.stdev[index] * 1.5)  # type: float
+                disposal_range = abs(self.stdev[index] * k)  # type: float
             else:
                 disposal_range = abs(self.stdev[index] * 0)  # type: float
 
@@ -85,11 +86,11 @@ class Snake(Strategy):
         elif short_pos_size > 0:
 
             if z_cur > 3.5:
-                disposal_range = abs(self.stdev[index] * 2.5)  # type: float
+                disposal_range = abs(self.stdev[index] * k)  # type: float
             elif z_cur > 3:
-                disposal_range = abs(self.stdev[index] * 2)  # type: float
+                disposal_range = abs(self.stdev[index] * k)  # type: float
             elif z_cur > 2.5:
-                disposal_range = abs(self.stdev[index] * 1.5)  # type: float
+                disposal_range = abs(self.stdev[index] * k)  # type: float
             else:
                 disposal_range = abs(self.stdev[index] * 0)  # type: float
 
@@ -102,36 +103,16 @@ class Snake(Strategy):
             # if order_size > 0:
             #     new_orders.append(self.buy(t=dt, size=order_size, price=self.ohlc['mean'][index] + disposal_range))
 
+        k = 1.5
+        z_outside = 3
+        z_inside = 1
+
         # 逆張りで買い
-        # if z_cur <= -2 and long_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.buy(t=dt, size=self.order_size + long_pos_size * 2, price=m - abs(self.stdev[index] * (z_cur + 1))))
-        # if -4.5 < z_cur <= -4 and long_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * 4.5)))
-        # if -4 < z_cur <= -3.5 and long_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * 4)))
-        # if -3.5 < z_cur <= -3 and long_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * 3.5)))
-        if -3 < z_cur <= -2.5 and long_pos_size < float(self.user_config['pos_limit_size']):
-            new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * 3)))
-        if -2.5 < z_cur <= -2 and long_pos_size < float(self.user_config['pos_limit_size']):
-            new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * 2.5)))
-        if -2 < z_cur <= -1.5 and long_pos_size < float(self.user_config['pos_limit_size']):
-            new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * 2)))
+        if -z_outside < z_cur <= -z_inside and long_pos_size < pos_lim_size:
+            new_orders.append(self.buy(t=dt, size=self.order_size, price=m - abs(self.stdev[index] * (z_cur * k))))
 
         # 逆張りで売り
-        # if 2 <= z_cur and short_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.sell(t=dt, size=self.order_size + short_pos_size * 2, price=m + abs(self.stdev[index] * (z_cur + 1))))
-        # if 4 <= z_cur < 4.5 and short_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * 4.5)))
-        # if 3.5 <= z_cur < 4 and short_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * 4)))
-        # if 3 <= z_cur < 3.5 and short_pos_size < float(self.user_config['pos_limit_size']):
-        #     new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * 3.5)))
-        if 2.5 <= z_cur < 3 and short_pos_size < float(self.user_config['pos_limit_size']):
-            new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * 3)))
-        if 2 <= z_cur < 2.5 and short_pos_size < float(self.user_config['pos_limit_size']):
-            new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * 2.5)))
-        if 1.5 <= z_cur < 2 and short_pos_size < float(self.user_config['pos_limit_size']):
-            new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * 2)))
+        if z_inside <= z_cur < z_outside and short_pos_size < pos_lim_size:
+            new_orders.append(self.sell(t=dt, size=self.order_size, price=m + abs(self.stdev[index] * (z_cur * k))))
 
         return new_orders

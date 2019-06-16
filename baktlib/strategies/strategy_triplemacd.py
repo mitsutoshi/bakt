@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import pandas as pd
 import talib
 
-from baktlib.models import Order
+from baktlib.models import Order, Position
 from baktlib.strategy import Strategy
 
 
@@ -31,6 +31,7 @@ class TripleMACD(Strategy):
               trade_num: int,
               dt: datetime,
               orders: List[Order],
+              positions: List[Position],
               long_pos_size: float,
               short_pos_size: float,
               ltp: float,
