@@ -53,7 +53,7 @@ class Snake(Strategy):
         #
 
         z_prv = self.price_z[index - 1]
-        z_cur = self.price_z[index] * (self.w / (self.w - 1))
+        z_cur = self.price_z[index] #* (self.w / (self.w - 1))
         m = self.ohlc['mean'][index]
         pos_lim_size = float(self.user_config['pos_limit_size'])
 
@@ -61,7 +61,7 @@ class Snake(Strategy):
         # ポジションを保有している場合は利確のための注文を行う
         #
 
-        k = 1.5
+        k = 2
         if long_pos_size > 0:
 
             if z_cur < -3.5:
@@ -105,7 +105,7 @@ class Snake(Strategy):
 
         k = 1.5
         z_outside = 3
-        z_inside = 1
+        z_inside = 2
 
         # 逆張りで買い
         if -z_outside < z_cur <= -z_inside and long_pos_size < pos_lim_size:

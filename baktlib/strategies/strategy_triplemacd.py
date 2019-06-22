@@ -59,12 +59,23 @@ class TripleMACD(Strategy):
         is_dc_mdl = mmacd[trade_num] < msignal[trade_num] and mmacd[trade_num - 1] >= msignal[trade_num - 1]
 
         new_orders = []  # type: List[Order]
+        
+        x = fmacd[trade_num] - fsignal[trade_num]
+        print(f'x={x}, per={round(x / fsignal[trade_num], 3)}')
+        
+        # buy entry
         if self.ema[trade_num] > 0 and (is_gc_fst or is_gc_mdl) and long_pos_size < self.pos_limit_size:
             new_orders.append(self.buy(t=dt, size=size + short_pos_size, price=ltp))
+            
+        # sell entry
         elif self.ema[trade_num] < 0 and (is_dc_fst or is_dc_mdl) and short_pos_size < self.pos_limit_size:
             new_orders.append(self.sell(t=dt, size=size + long_pos_size, price=ltp))
+        
+        # sell for close
         elif long_pos_size > 0 and (is_dc_fst or is_dc_mdl):
             new_orders.append(self.sell(t=dt, size=size + long_pos_size, price=ltp))
+            
+        # buy for close
         elif short_pos_size > 0 and (is_gc_fst or is_gc_mdl):
             new_orders.append(self.buy(t=dt, size=size + short_pos_size, price=ltp))
 
